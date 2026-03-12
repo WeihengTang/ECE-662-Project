@@ -118,25 +118,29 @@ def plot_params_vs_K(pca, dcf):
 # ── Fig 3 — Accuracy: FB vs DCF (Task 2) ─────────────────────────────────────
 
 def plot_fb_dcf_accuracy(pca, dcf, fb):
-    fig, ax = plt.subplots(figsize=(6, 4))
+    fig, ax = plt.subplots(figsize=(9, 5))
 
+    all_K = []
     if fb:
         K_fb  = fb['results']['K_list']
         a_fb  = fb['results']['best_test_acc']
         ax.plot(K_fb, a_fb, '^-', label='FB (fixed atoms, learned coefficients)',
                 color='tab:green')
+        all_K.extend(K_fb)
 
     if dcf:
         K_dcf = dcf['results']['K_list']
         a_dcf = dcf['results']['best_test_acc']
         ax.plot(K_dcf, a_dcf, 's-', label='DCF (learned atoms + coefficients)',
                 color='tab:orange')
+        all_K.extend(K_dcf)
 
     if pca:
         K_pca = pca['K_list']
         a_pca = pca['test_acc']
         ax.plot(K_pca, a_pca, 'o--', label='PCA (post-hoc reconstruction)',
                 color='tab:blue', alpha=0.7)
+        all_K.extend(K_pca)
         if pca.get('baseline_test_acc'):
             ax.axhline(pca['baseline_test_acc'], linestyle=':', color='gray',
                        label=f"Baseline ({pca['baseline_test_acc']:.2f}%)")
@@ -144,10 +148,10 @@ def plot_fb_dcf_accuracy(pca, dcf, fb):
     ax.set_xlabel('Number of Components K')
     ax.set_ylabel('Test Accuracy (%)')
     ax.set_title('Task 2: FB Bases vs DCF (Learned Atoms)\nMNIST Classification Accuracy')
+    ax.set_xticks(sorted(set(int(k) for k in all_K)))
     ax.legend(fontsize=9, bbox_to_anchor=(1.05, 0.5), loc='center left',
               borderaxespad=0)
     ax.grid(True, alpha=0.3)
-    plt.tight_layout()
     savefig(fig, 'fig3_fb_dcf_accuracy_vs_K.pdf')
 
 

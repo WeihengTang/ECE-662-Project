@@ -67,12 +67,14 @@ def style():
 # ── Fig 1 — SVHN Accuracy vs K (all DCF experiments) ─────────────────────────
 
 def plot_accuracy_vs_K(direct, adapt):
-    fig, ax = plt.subplots(figsize=(7, 4.5))
+    fig, ax = plt.subplots(figsize=(9, 5))
 
+    K_ticks = []
     if direct:
         K  = direct['results']['K_list']
         a  = direct['results']['best_test_acc']
         ax.plot(K, a, 's-', color='tab:red',   label='Exp A: DCF trained on SVHN (upper bound)')
+        K_ticks = K
 
     if adapt:
         K      = adapt['results']['K_list']
@@ -80,19 +82,20 @@ def plot_accuracy_vs_K(direct, adapt):
         a_expB = adapt['results']['expB_svhn_acc']
         a_expC = adapt['results']['expC_svhn_acc']
         ax.plot(K, a_expB, 'o-', color='tab:blue',
-                label='Exp B: Adapt atoms ψ_k  (freeze a_k)')
+                label='Exp B: Adapt atoms $\\psi_k$  (freeze $a_k$)')
         ax.plot(K, a_expC, '^--', color='tab:orange',
-                label='Exp C: Adapt coefficients a_k  (freeze ψ_k)  [ablation]')
+                label='Exp C: Adapt coefficients $a_k$  (freeze $\\psi_k$)')
         ax.plot(K, a_pre,  'D:', color='gray', alpha=0.7,
-                label='MNIST→SVHN (no adaptation)')
+                label='MNIST$\\to$SVHN (no adaptation)')
+        K_ticks = K
 
     ax.set_xlabel('Number of Filter Atoms $K$')
     ax.set_ylabel('SVHN Test Accuracy (%)')
     ax.set_title('Part 2: SVHN Test Accuracy vs $K$\n(DCF Domain Adaptation Experiments)')
+    ax.set_xticks([int(k) for k in K_ticks])
     ax.legend(fontsize=9, bbox_to_anchor=(1.05, 0.5), loc='center left',
               borderaxespad=0)
     ax.grid(True, alpha=0.3)
-    plt.tight_layout()
     savefig(fig, 'fig_p2_accuracy_vs_K.pdf')
 
 
