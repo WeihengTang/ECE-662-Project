@@ -32,7 +32,7 @@ RESULTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'results'
 os.makedirs(RESULTS_DIR, exist_ok=True)
 
 K_LIST_DCF = [1, 2, 3, 4, 5, 6, 7, 8, 9]  # DCF: any K up to 9 (full rank)
-K_LIST_FB  = [1, 2, 3, 4, 5, 6, 7, 8]     # FB:  max 8 for kernel_size=3
+K_LIST_FB  = [1, 2, 3, 4, 5, 6]            # FB:  max 6 for kernel_size=3
 
 
 def get_args():
