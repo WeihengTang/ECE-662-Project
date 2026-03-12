@@ -149,8 +149,7 @@ def plot_fb_dcf_accuracy(pca, dcf, fb):
     ax.set_ylabel('Test Accuracy (%)')
     ax.set_title('Task 2: FB Bases vs DCF (Learned Atoms)\nMNIST Classification Accuracy')
     ax.set_xticks(sorted(set(int(k) for k in all_K)))
-    ax.legend(fontsize=9, bbox_to_anchor=(1.05, 0.5), loc='center left',
-              borderaxespad=0)
+    ax.legend(fontsize=9, loc='lower right')
     ax.grid(True, alpha=0.3)
     savefig(fig, 'fig3_fb_dcf_accuracy_vs_K.pdf')
 

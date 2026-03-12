@@ -93,8 +93,7 @@ def plot_accuracy_vs_K(direct, adapt):
     ax.set_ylabel('SVHN Test Accuracy (%)')
     ax.set_title('Part 2: SVHN Test Accuracy vs $K$\n(DCF Domain Adaptation Experiments)')
     ax.set_xticks([int(k) for k in K_ticks])
-    ax.legend(fontsize=9, bbox_to_anchor=(1.05, 0.5), loc='center left',
-              borderaxespad=0)
+    ax.legend(fontsize=9, loc='center right')
     ax.grid(True, alpha=0.3)
     savefig(fig, 'fig_p2_accuracy_vs_K.pdf')
 
