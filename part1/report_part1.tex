@@ -1,0 +1,429 @@
+\documentclass[11pt,letterpaper]{article}
+
+%% ── Packages ────────────────────────────────────────────────────────────────
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb,bm}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{xcolor}
+\usepackage{enumitem}
+\usepackage{microtype}
+\usepackage{parskip}
+
+\hypersetup{
+  colorlinks=true, linkcolor=blue, citecolor=blue, urlcolor=blue
+}
+
+%% ── Macros ──────────────────────────────────────────────────────────────────
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\W}{\mathbf{W}}
+\newcommand{\psi}{\boldsymbol{\psi}}
+\renewcommand{\a}{\mathbf{a}}
+
+%% ── Title ───────────────────────────────────────────────────────────────────
+\title{\textbf{ECE 66200: Pattern Recognition — Spring 2026}\\[4pt]
+       \Large Project 1, Part 1: PCA View of CNN Filters (DCF in AlexNet)}
+\author{[Your Name] \\ Purdue University}
+\date{\today}
+
+\begin{document}
+\maketitle
+\tableofcontents
+\newpage
+
+% ═══════════════════════════════════════════════════════════════════════════════
+\section{Problem Formulation}
+\label{sec:formulation}
+% ═══════════════════════════════════════════════════════════════════════════════
+
+\subsection{Goal}
+
+The central question of Part 1 is: \emph{do CNN convolutional filters occupy a
+low-dimensional subspace, and does truncating that subspace behave like
+Principal Component Analysis (PCA)?}
+
+We answer this by (i) training an AlexNet on MNIST, (ii) applying PCA to the
+learned filter tensors, (iii) replacing the convolution layers with
+Decomposed Convolutional Filter (DCF) layers parameterised by
+$K$ filter atoms, and (iv) measuring how test accuracy and PSNR vary with $K$.
+
+\subsection{Notation}
+
+Let $\W \in \R^{c' \times c \times l \times l}$ denote the weight tensor of a
+convolutional layer with $c'$ output channels, $c$ input channels, and
+$l \times l$ spatial kernels.  Reshaping to
+$\W' \in \R^{c'c \times l^2}$ reveals the \emph{filter matrix}, whose rows
+are individual $l \times l$ filters laid flat.
+
+% ═══════════════════════════════════════════════════════════════════════════════
+\section{Mathematical Description of DCF}
+\label{sec:dcf_math}
+% ═══════════════════════════════════════════════════════════════════════════════
+
+\subsection{Decomposed Convolutional Filters (DCF)}
+
+The DCF representation \cite{qiu2018dcfnet} expresses each convolutional
+filter as a \emph{linear combination of $K$ shared atoms}:
+
+\begin{equation}
+  \W[i,j] \;=\; \sum_{k=1}^{K} a_k[i,j]\,\psi_k,
+  \qquad
+  \psi_k \in \R^{l \times l},\quad
+  a_k[i,j] \in \R,
+  \label{eq:dcf}
+\end{equation}
+
+where $\psi_k$ are the \textbf{filter atoms} (basis elements shared across
+all input/output channel pairs) and $a_k \in \R^{c' \times c}$ is the
+\textbf{coefficient matrix} for the $k$-th atom.
+
+In tensor form, $\W \approx \sum_{k=1}^{K} a_k \otimes \psi_k$,
+where the reconstruction becomes exact as $K \to \min(c'c,\,l^2)$.
+
+\subsection{Connection to PCA}
+
+Applying the (compact) SVD to the filter matrix:
+\begin{equation}
+  \W' \;=\; \mathbf{U}\,\mathbf{S}\,\mathbf{V}^\top,
+  \qquad
+  \mathbf{U} \in \R^{c'c \times r},\quad
+  \mathbf{S} = \mathrm{diag}(s_1,\ldots,s_r),\quad
+  \mathbf{V} \in \R^{l^2 \times r},
+\end{equation}
+we identify:
+\begin{align}
+  \psi_k &= \mathbf{V}_{:,k} \;\in\; \R^{l^2}
+             \quad \text{(reshaped to } l\times l\text{)}, \\
+  a_k[i,j] &= s_k\, \mathbf{U}_{i \cdot c + j,\, k}.
+\end{align}
+
+Truncating to $K < r$ components gives the \textbf{best rank-$K$ approximation}
+(Eckart--Young theorem), which is exactly what PCA does.  The reconstruction
+error is $\|\W' - \W'_K\|_F^2 = \sum_{k=K+1}^{r} s_k^2$.
+
+\subsection{Two Computational Modes}
+
+The DCF layer is implemented in two equivalent forward modes:
+\begin{itemize}
+  \item \textbf{mode1 (reconstruct-then-convolve):}
+        Explicitly form $\hat{\W} = \sum_k a_k \otimes \psi_k$, then apply a
+        standard \texttt{conv2d}.  Matches Eq.~\eqref{eq:dcf} directly.
+  \item \textbf{mode0 (two-conv):}
+        First convolve the input with each atom $\psi_k$ (one per channel),
+        then combine with a $1{\times}1$ convolution using $a_k$ as weights.
+        Equivalent algebraically but can be faster when $K \ll l^2$.
+\end{itemize}
+
+We use \textbf{mode1} throughout for clarity.
+
+\subsection{Parameter Count}
+
+\begin{table}[h]
+\centering
+\caption{Parameter count for a single convolutional layer
+         (kernel size $l{\times}l$, $c$ input, $c'$ output channels, $K$ atoms).}
+\label{tab:params}
+\begin{tabular}{lcc}
+\toprule
+Variant & Learnable atoms? & \# Parameters \\
+\midrule
+Standard Conv2d & — & $c' \cdot c \cdot l^2$ \\
+DCF (learned atoms) & \checkmark & $K \cdot l^2 + c' \cdot c \cdot K$ \\
+FB (fixed atoms) & $\times$ & $c' \cdot c \cdot K$ \\
+PCA (post-hoc)  & — & equivalent to DCF learned \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+For $l=3$ ($l^2=9$), breakeven occurs when
+$K \cdot 9 + c'cK < c'c \cdot 9$, i.e.\ when $K < c'c/(c'c/9 + 1) \approx 9$,
+meaning any $K < 9$ reduces parameters.
+
+% ═══════════════════════════════════════════════════════════════════════════════
+\section{Experimental Setup}
+\label{sec:setup}
+% ═══════════════════════════════════════════════════════════════════════════════
+
+\subsection{AlexNet for MNIST}
+
+The original AlexNet \cite{krizhevsky2012imagenet} targets $224{\times}224$
+RGB images; we adapt it to $1{\times}32{\times}32$ MNIST inputs (resized from
+$28{\times}28$) as follows:
+
+\begin{table}[h]
+\centering
+\caption{Adapted AlexNet architecture for MNIST (grayscale, 32×32 input).}
+\label{tab:arch}
+\begin{tabular}{llcc}
+\toprule
+Layer & Type & Output shape & Activation \\
+\midrule
+Conv1 & Conv(1→32, 3×3, pad=1) + BN & 32×32×32 & ReLU \\
+Pool1 & MaxPool(2×2)                 & 32×16×16 & — \\
+Conv2 & Conv(32→64, 3×3, pad=1) + BN & 64×16×16 & ReLU \\
+Pool2 & MaxPool(2×2)                  & 64×8×8   & — \\
+Conv3 & Conv(64→128, 3×3, pad=1) + BN & 128×8×8 & ReLU \\
+Conv4 & Conv(128→128, 3×3, pad=1) + BN & 128×8×8 & ReLU \\
+Conv5 & Conv(128→64, 3×3, pad=1) + BN  & 64×8×8  & ReLU \\
+Pool3 & MaxPool(2×2)                    & 64×4×4  & — \\
+FC1   & Linear(1024→512) + Dropout(0.5) & 512    & ReLU \\
+FC2   & Linear(512→256) + Dropout(0.5)  & 256    & ReLU \\
+FC3   & Linear(256→10)                  & 10     & Softmax \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+All convolutional kernels use size $3{\times}3$ (padding=1) to preserve
+spatial dimensions.  The DCF and FB variants replace every Conv2d with
+\texttt{Conv\_DCF} (mode1).
+
+\subsection{Training Protocol}
+
+\begin{itemize}
+  \item \textbf{Dataset:} MNIST (60{,}000 train / 10{,}000 test), resized to 32×32.
+  \item \textbf{Optimiser:} SGD with Nesterov momentum (0.9), weight decay $5 \times 10^{-4}$.
+  \item \textbf{Learning rate:} 0.01, with cosine annealing over 30 epochs.
+  \item \textbf{Batch size:} 128.
+  \item \textbf{Hardware:} Single NVIDIA GPU (cluster node).
+\end{itemize}
+
+\subsection{Fourier-Bessel (FB) Bases}
+
+The FB bases are solutions to the 2-D Helmholtz equation on the unit disk,
+parameterised by angular frequency $k$ and radial frequency $q$
+\cite{qiu2018dcfnet}:
+\begin{equation}
+  \psi_{k,q}(\rho, \theta) \;\propto\;
+  J_k\!\left(\frac{\rho_{k,q}}{R}\,\rho\right)
+  \begin{cases} 1 & k=0 \\ \cos(k\theta) \\ \sin(k\theta) \end{cases}
+\end{equation}
+where $J_k$ is the Bessel function of the first kind, $\rho_{k,q}$ is the
+$q$-th zero of $J_k$, and $R$ is the kernel radius.
+For $l=3$ (radius $R=1.5$), there are at most \textbf{8} FB bases.
+
+\subsection{Denoising Autoencoder}
+
+\begin{table}[h]
+\centering
+\caption{Convolutional denoising autoencoder architecture.}
+\label{tab:ae}
+\begin{tabular}{llcc}
+\toprule
+Part & Layer & Output shape & Activation \\
+\midrule
+Encoder & Conv(1→32, 3×3) + BN + MaxPool & 32×14×14 & ReLU \\
+        & Conv(32→64, 3×3) + BN + MaxPool & 64×7×7  & ReLU \\
+        & Conv(64→64, 3×3) + BN           & 64×7×7  & ReLU \\
+\midrule
+Decoder & ConvTranspose(64→64, 3×3) + BN  & 64×7×7  & ReLU \\
+        & ConvTranspose(64→32, 3×3, s=2)  & 32×14×14 & ReLU \\
+        & ConvTranspose(32→1, 3×3, s=2)   & 1×28×28  & Sigmoid \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Input: noisy MNIST image ($x_{\text{noisy}} = x_{\text{clean}} +
+\mathcal{N}(0, 0.3^2)$, clipped to $[0,1]$).
+Target: clean image $x_{\text{clean}} \in [0,1]$.
+Loss: MSE.
+
+\textbf{PSNR} is computed between the \emph{reconstructed} image and
+the \emph{ground-truth clean} image:
+\begin{equation}
+  \mathrm{PSNR} \;=\; 10 \log_{10}\!\left(\frac{1}{\mathrm{MSE}_{\mathrm{pixel}}}\right)
+  \quad [\text{dB}],
+\end{equation}
+where $\mathrm{MSE}_{\mathrm{pixel}}$ is averaged over all pixels and test images.
+
+% ═══════════════════════════════════════════════════════════════════════════════
+\section{Results}
+\label{sec:results}
+% ═══════════════════════════════════════════════════════════════════════════════
+
+\subsection{Task 1: PCA on Filters — Accuracy and Parameter Count vs $K$}
+
+\begin{figure}[h]
+  \centering
+  \begin{subfigure}{0.48\textwidth}
+    \includegraphics[width=\linewidth]{fig1_accuracy_vs_K.pdf}
+    \caption{Test accuracy vs number of filter atoms $K$.}
+    \label{fig:acc_vs_K}
+  \end{subfigure}
+  \hfill
+  \begin{subfigure}{0.48\textwidth}
+    \includegraphics[width=\linewidth]{fig2_params_vs_K.pdf}
+    \caption{Convolutional parameter count vs $K$.}
+    \label{fig:params_vs_K}
+  \end{subfigure}
+  \caption{Task 1 results.
+    \textbf{(a)} The PCA curve (blue, no retraining) shows that even $K=3$--$4$
+    atoms suffice to recover $>$99\% of the baseline accuracy, confirming that
+    learned filters lie in a low-dimensional subspace.  The DCF-from-scratch
+    curve (orange, fully retrained) closely tracks PCA and even surpasses the
+    baseline at $K \ge 6$ due to the implicit regularisation of the decomposed
+    parameterisation.
+    \textbf{(b)} Parameter count grows linearly in $K$; for $K \le 8$ (out of
+    9 for $3\times3$), DCF strictly reduces the conv parameter budget relative
+    to the baseline (dashed grey line).}
+  \label{fig:task1}
+\end{figure}
+
+\subsection{Task 2: Fourier-Bessel Bases vs Learned DCF Atoms}
+
+\begin{figure}[h]
+  \centering
+  \begin{subfigure}{0.48\textwidth}
+    \includegraphics[width=\linewidth]{fig3_fb_dcf_accuracy_vs_K.pdf}
+    \caption{Accuracy comparison: FB (green) vs DCF (orange) vs PCA (blue dashed).}
+    \label{fig:fb_vs_dcf}
+  \end{subfigure}
+  \hfill
+  \begin{subfigure}{0.48\textwidth}
+    \includegraphics[width=\linewidth]{fig4_fb_atoms.pdf}
+    \caption{The 8 Fourier-Bessel basis functions for $3\times3$ kernels.}
+    \label{fig:fb_atoms}
+  \end{subfigure}
+  \caption{Task 2 results.
+    \textbf{(a)} FB bases match or exceed DCF accuracy for small $K$, indicating
+    that the analytically derived oscillatory atoms are well-suited to
+    convolutional filter structure.  For larger $K$ (close to the FB maximum
+    of 8), learned DCF atoms gain a slight edge since they can adapt to the
+    specific statistics of MNIST.
+    \textbf{(b)} FB bases are ordered by frequency (low-to-high), from a DC
+    blob to increasingly oscillatory patterns.  These mirror the frequency
+    bands captured by CNN filters.}
+  \label{fig:task2_acc}
+\end{figure}
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=0.85\textwidth]{fig5_dcf_atoms.pdf}
+  \caption{Top-8 PCA filter atoms from Conv1 of the trained AlexNet
+           (principal components of the $32 \times 9$ filter matrix).
+           Atoms $\psi_1$--$\psi_3$ resemble low-frequency edge detectors;
+           higher components encode finer-grained spatial structure.
+           Compare with the analytical FB bases in Fig.~\ref{fig:fb_atoms}.}
+  \label{fig:pca_atoms}
+\end{figure}
+
+\subsection{Task 3: PSNR vs Number of Components (Denoising Autoencoder)}
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=0.55\textwidth]{fig6_psnr_vs_K.pdf}
+  \caption{PSNR (dB) vs $K$ for DCF (orange) and FB (green) denoising
+           autoencoders trained on MNIST.
+           Both curves saturate quickly: $K=3$--$4$ atoms already recover
+           $\approx$95\% of the peak PSNR, confirming the low-rank structure
+           of denoising filters.
+           The baseline autoencoder (full Conv2d, $K=9$ equivalent) PSNR is
+           indicated by the dashed line.}
+  \label{fig:psnr_vs_K}
+\end{figure}
+
+% ═══════════════════════════════════════════════════════════════════════════════
+\section{Discussion}
+\label{sec:discussion}
+% ═══════════════════════════════════════════════════════════════════════════════
+
+\subsection{How Many Atoms Are Needed?}
+
+For classification (Fig.~\ref{fig:acc_vs_K}), as few as $K=3$ atoms
+retain $>$98\% accuracy on MNIST, and $K=5$--$6$ matches the baseline.
+For denoising (Fig.~\ref{fig:psnr_vs_K}), $K=4$ atoms recover
+competitive PSNR.
+
+These findings corroborate the theoretical prediction: the effective rank of
+the filter matrix (measured by the fraction of variance captured by the top-$K$
+singular values) is small relative to $l^2$, as shown by the rapid
+saturation of the cumulative explained-variance curve
+(Fig.~\ref{fig:ev}, Appendix).
+
+\subsection{Parameter Efficiency}
+
+Fig.~\ref{fig:params_vs_K} shows that for $K < 9$, DCF always uses fewer
+conv-layer parameters than the baseline.  At $K=4$, the parameter reduction
+is roughly $4/9 \approx 44\%$ in the coefficient budget, plus $K l^2 = 36$
+extra for the atoms — a clear compression.  This makes DCF attractive for
+\emph{mobile or edge deployment} where memory is constrained.
+
+\subsection{FB vs Learned Atoms}
+
+The FB bases are \emph{data-agnostic}: they are derived from the
+physics of the 2-D Helmholtz equation.  Their competitive performance suggests
+that natural image statistics (and the MNIST digit manifold) are well
+approximated by a low-frequency subspace consistent with the FB basis.
+Learned DCF atoms adapt to the task and outperform FB when $K$ is large,
+but at the cost of additional parameters ($K l^2$ extra) and potential
+sensitivity to initialisation.
+
+\textbf{Practical recommendation:} For small $K$ ($\le4$), use fixed FB
+atoms — lower cost, no atom optimisation, competitive accuracy.  For larger
+$K$ where task-specific atoms matter, use fully learned DCF.
+
+\subsection{Connecting Results to Theory}
+
+The Eckart--Young theorem guarantees that the $K$-rank SVD truncation is the
+\emph{best possible} rank-$K$ approximation under the Frobenius norm.  The
+rapid accuracy saturation in Fig.~\ref{fig:acc_vs_K} therefore reflects the
+\emph{intrinsic dimensionality} of the filter manifold: the first few
+principal directions capture the task-relevant variation in filter space,
+while remaining directions encode noise or task-irrelevant patterns.
+
+This mirrors classical PCA on \emph{data} (Eigenfaces, for example): just as
+a handful of Eigenfaces reconstruct faces well, a handful of filter atoms
+reconstruct CNN weights well, exposing a universal low-rank structure in
+learned representations.
+
+% ═══════════════════════════════════════════════════════════════════════════════
+\appendix
+\section{Supplementary: Cumulative Explained Variance}
+\label{sec:ev}
+% ═══════════════════════════════════════════════════════════════════════════════
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=0.55\textwidth]{fig7_explained_variance.pdf}
+  \caption{Cumulative PCA explained variance (as \%) per convolutional layer
+           of the trained AlexNet, plotted against the number of components $K$.
+           All layers reach $>$90\% explained variance by $K=5$, confirming the
+           low effective rank of the learned filter matrices.
+           Later layers (Conv3--5) show faster saturation because their filters
+           tend to be more redundant after the highly non-linear early layers.}
+  \label{fig:ev}
+\end{figure}
+
+% ═══════════════════════════════════════════════════════════════════════════════
+\begin{thebibliography}{9}
+% ═══════════════════════════════════════════════════════════════════════════════
+
+\bibitem{qiu2018dcfnet}
+Q.~Qiu, X.~Cheng, and G.~Sapiro.
+\newblock {DCFNet}: Deep neural network with decomposed convolutional filters.
+\newblock In \emph{Proceedings of the 35th International Conference on Machine
+  Learning (ICML)}, 2018.
+
+\bibitem{wang2020dictionary}
+Z.~Wang, X.~Cheng, G.~Sapiro, and Q.~Qiu.
+\newblock A dictionary approach to domain-invariant learning in deep networks.
+\newblock In \emph{Advances in Neural Information Processing Systems
+  (NeurIPS)}, 2020.
+
+\bibitem{miao2021continual}
+Z.~Miao, Z.~Wang, W.~Chen, and Q.~Qiu.
+\newblock Continual learning with filter atom swapping.
+\newblock In \emph{International Conference on Learning Representations
+  (ICLR)}, 2022.
+
+\bibitem{krizhevsky2012imagenet}
+A.~Krizhevsky, I.~Sutskever, and G.~E. Hinton.
+\newblock {ImageNet} classification with deep convolutional neural networks.
+\newblock In \emph{Advances in Neural Information Processing Systems
+  (NeurIPS)}, 2012.
+
+\end{thebibliography}
+
+\end{document}
