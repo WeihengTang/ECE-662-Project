@@ -34,7 +34,7 @@ RESULTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'results'
 os.makedirs(RESULTS_DIR, exist_ok=True)
 
 # For k=3, max FB bases = 8.  Sweep K from 1 to 8.
-K_LIST_FB = [1, 2, 3, 4, 5, 6, 7, 8]
+K_LIST_FB = [1, 2, 3, 4, 5, 6]   # max FB bases for kernel_size=3 is 6
 
 
 def get_args():
@@ -145,10 +145,11 @@ def main():
 
     train_ld, test_ld = get_loaders(args.batch_size)
 
-    # Save FB atom visualisation (always use K=8 = max)
-    fb_atoms = get_fb_bases_tensor(3, 8).numpy()  # (8, 3, 3)
-    np.save(os.path.join(RESULTS_DIR, 'fb_atoms_K8.npy'), fb_atoms)
-    print(f'FB atoms (8×3×3) saved to results/fb_atoms_K8.npy')
+    # Save FB atom visualisation (use max available bases for kernel_size=3)
+    _max_k = max_fb_bases(3)
+    fb_atoms = get_fb_bases_tensor(3, _max_k).numpy()
+    np.save(os.path.join(RESULTS_DIR, f'fb_atoms_K{_max_k}.npy'), fb_atoms)
+    print(f'FB atoms ({_max_k}×3×3) saved to results/fb_atoms_K{_max_k}.npy')
 
     results = {'K_list': [], 'best_test_acc': [], 'total_params': [], 'conv_params': []}
 
