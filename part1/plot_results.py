@@ -5,7 +5,7 @@ Required input files (in results/):
     pca_results.json
     dcf_results.json
     fb_results.json
-    fb_atoms_K8.npy
+    fb_atoms_K6.npy
     autoencoder_dcf_results.json
     autoencoder_fb_results.json
 
@@ -152,11 +152,17 @@ def plot_fb_dcf_accuracy(pca, dcf, fb):
 # ── Fig 4 — Visualise FB Atoms ────────────────────────────────────────────────
 
 def plot_fb_atoms():
-    path = os.path.join(RESULTS_DIR, 'fb_atoms_K8.npy')
-    if not os.path.exists(path):
-        print(f'[WARN] {path} not found — skipping Fig 4.')
+    # Accept either fb_atoms_K6.npy (current) or fb_atoms_K8.npy (legacy)
+    path = None
+    for candidate in ['fb_atoms_K6.npy', 'fb_atoms_K8.npy']:
+        p = os.path.join(RESULTS_DIR, candidate)
+        if os.path.exists(p):
+            path = p
+            break
+    if path is None:
+        print(f'[WARN] fb_atoms_K*.npy not found in {RESULTS_DIR} — skipping Fig 4.')
         return
-    atoms = np.load(path)   # (8, 3, 3)
+    atoms = np.load(path)
     K = atoms.shape[0]
     fig, axes = plt.subplots(1, K, figsize=(K * 1.4, 1.8))
     for k, ax in enumerate(axes):
@@ -164,7 +170,7 @@ def plot_fb_atoms():
                        vmin=-np.abs(atoms).max(), vmax=np.abs(atoms).max())
         ax.set_title(f'$\\psi_{{{k+1}}}$', fontsize=9)
         ax.axis('off')
-    fig.suptitle('Fourier-Bessel Bases (3×3, K=8)', y=1.02)
+    fig.suptitle(f'Fourier-Bessel Bases (3×3, K={K})', y=1.02)
     plt.tight_layout()
     savefig(fig, 'fig4_fb_atoms.pdf')
 
