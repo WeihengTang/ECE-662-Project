@@ -39,8 +39,8 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'part1'))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from config import RESULTS_DIR
 from datasets_part2 import get_mnist_loaders, get_svhn_loaders, get_svhn_test_loader
