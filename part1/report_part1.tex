@@ -202,7 +202,7 @@ parameterised by angular frequency $k$ and radial frequency $q$
 \end{equation}
 where $J_k$ is the Bessel function of the first kind, $\rho_{k,q}$ is the
 $q$-th zero of $J_k$, and $R$ is the kernel radius.
-For $l=3$ (radius $R=1.5$), there are at most \textbf{8} FB bases.
+For $l=3$ (radius $R=1.5$), there are at most \textbf{6} FB bases.
 
 \subsection{Denoising Autoencoder}
 
@@ -259,12 +259,14 @@ where $\mathrm{MSE}_{\mathrm{pixel}}$ is averaged over all pixels and test image
     \label{fig:params_vs_K}
   \end{subfigure}
   \caption{Task 1 results.
-    \textbf{(a)} The PCA curve (blue, no retraining) shows that even $K=3$--$4$
-    atoms suffice to recover $>$99\% of the baseline accuracy, confirming that
-    learned filters lie in a low-dimensional subspace.  The DCF-from-scratch
-    curve (orange, fully retrained) closely tracks PCA and even surpasses the
-    baseline at $K \ge 6$ due to the implicit regularisation of the decomposed
-    parameterisation.
+    \textbf{(a)} The PCA curve (blue, no retraining) shows a dramatic accuracy
+    cliff: $K \le 5$ atoms yield near-random performance (9.7--26.4\%), $K=7$
+    recovers 97.0\%, and only $K=9$ (full rank) restores the baseline 99.65\%.
+    Without retraining the network depends on nearly all principal components.
+    The DCF-from-scratch curve (orange, fully retrained) tells a very different
+    story: even $K=1$ atom achieves 98.96\%, and $K \ge 2$ essentially matches
+    the baseline --- demonstrating that the compression penalty disappears when
+    the basis is jointly optimised.
     \textbf{(b)} Parameter count grows linearly in $K$; for $K \le 8$ (out of
     9 for $3\times3$), DCF strictly reduces the conv parameter budget relative
     to the baseline (dashed grey line).}
@@ -283,18 +285,19 @@ where $\mathrm{MSE}_{\mathrm{pixel}}$ is averaged over all pixels and test image
   \hfill
   \begin{subfigure}{0.48\textwidth}
     \includegraphics[width=\linewidth]{fig4_fb_atoms.pdf}
-    \caption{The 8 Fourier-Bessel basis functions for $3\times3$ kernels.}
+    \caption{The 6 Fourier-Bessel basis functions for $3\times3$ kernels.}
     \label{fig:fb_atoms}
   \end{subfigure}
   \caption{Task 2 results.
-    \textbf{(a)} FB bases match or exceed DCF accuracy for small $K$, indicating
-    that the analytically derived oscillatory atoms are well-suited to
-    convolutional filter structure.  For larger $K$ (close to the FB maximum
-    of 8), learned DCF atoms gain a slight edge since they can adapt to the
-    specific statistics of MNIST.
-    \textbf{(b)} FB bases are ordered by frequency (low-to-high), from a DC
-    blob to increasingly oscillatory patterns.  These mirror the frequency
-    bands captured by CNN filters.}
+    \textbf{(a)} FB bases closely match DCF accuracy across all $K$.  At $K=1$,
+    FB reaches 98.34\% vs DCF's 98.96\%; by $K=2$, both exceed 99.4\% and
+    track the baseline throughout.  The FB maximum of $K=6$ (the number of valid
+    Bessel modes for $3\times3$ kernels) is sufficient to match the DCF plateau
+    at 99.64\%, confirming that the analytical FB subspace captures the same
+    task-relevant directions as the learned atoms.
+    \textbf{(b)} The 6 FB bases are ordered by frequency (low-to-high), from
+    a DC blob to increasingly oscillatory patterns, mirroring the frequency
+    bands captured by trained CNN filters.}
   \label{fig:task2_acc}
 \end{figure}
 
@@ -331,10 +334,13 @@ where $\mathrm{MSE}_{\mathrm{pixel}}$ is averaged over all pixels and test image
 
 \subsection{How Many Atoms Are Needed?}
 
-For classification (Fig.~\ref{fig:acc_vs_K}), as few as $K=3$ atoms
-retain $>$98\% accuracy on MNIST, and $K=5$--$6$ matches the baseline.
-For denoising (Fig.~\ref{fig:psnr_vs_K}), $K=4$ atoms recover
-competitive PSNR.
+The answer depends critically on \emph{whether the basis is retrained}.
+For PCA (no retraining), $K \ge 7$ is required to recover $>$97\% accuracy;
+fewer atoms destroy performance.
+For DCF with retraining, even $K=1$ atom achieves 98.96\% and $K \ge 2$
+matches the baseline, as does FB with $K \ge 2$ (99.43\%).
+For denoising (Fig.~\ref{fig:psnr_vs_K}), $K=4$ DCF atoms already recover
+23.58 dB, within 0.17 dB of the $K=9$ ceiling of 23.75 dB.
 
 These findings corroborate the theoretical prediction: the effective rank of
 the filter matrix (measured by the fraction of variance captured by the top-$K$
@@ -389,10 +395,13 @@ learned representations.
   \includegraphics[width=0.55\textwidth]{fig7_explained_variance.pdf}
   \caption{Cumulative PCA explained variance (as \%) per convolutional layer
            of the trained AlexNet, plotted against the number of components $K$.
-           All layers reach $>$90\% explained variance by $K=5$, confirming the
-           low effective rank of the learned filter matrices.
-           Later layers (Conv3--5) show faster saturation because their filters
-           tend to be more redundant after the highly non-linear early layers.}
+           Conv1 (features.0) reaches 83\% at $K=6$ and 95.5\% at $K=8$;
+           deeper layers reach $\sim$73\% at $K=6$, reflecting greater filter
+           diversity.  All layers require $K=9$ (full rank) for 100\% variance,
+           consistent with the PCA accuracy cliff observed in
+           Fig.~\ref{fig:acc_vs_K}: even small unexplained variance
+           ($\sim$5--17\% at $K \le 7$) disrupts classification without
+           retraining.}
   \label{fig:ev}
 \end{figure}
 

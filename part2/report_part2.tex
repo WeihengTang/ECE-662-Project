@@ -143,8 +143,10 @@ $\mD_\text{src}$ (MNIST).  We consider three SVHN evaluation scenarios:
     \textbf{Freeze} $\psivec_k$.
     \textbf{Unfreeze} $a_k$.
     Fine-tune on $\mD_\text{tgt}$.
-    Hypothesis (to falsify): if $\psivec_k$ is the domain-invariant part,
-    this should \emph{not} perform as well as Exp B.
+    Original hypothesis (to falsify): if $\psivec_k$ is the domain-invariant
+    part, this should perform \emph{worse} than Exp B.
+    \emph{Actual result: Exp C substantially outperforms Exp B, revealing
+    that atoms are in fact the transferable component for digit domains.}
 \end{description}
 
 \subsection{Parameter Count During Adaptation}
@@ -217,30 +219,32 @@ $K$ is swept over $\{1, 2, 4, 6, 8\}$ for all DCF experiments.
 \subsection{Task 1: Baseline (No Adaptation)}
 
 Table~\ref{tab:main_results} (first row) and Fig.~\ref{fig:summary_bar} show
-that the AlexNet trained on MNIST achieves only $\sim$\textbf{[XX.X]}\% accuracy
-on SVHN, compared to $\sim$99\% on MNIST itself.
-This severe performance drop ($\sim$60--70 percentage points) quantifies the
+that the AlexNet trained on MNIST achieves only $\sim$\textbf{18.2}\% accuracy
+on SVHN, compared to $\sim$99.65\% on MNIST itself.
+This severe performance drop ($\sim$81 percentage points) quantifies the
 domain gap and motivates the need for adaptation.
 
 \subsection{Task 2A: DCF Upper Bound}
 
 Training DCF-AlexNet directly on SVHN (Exp A) achieves
-$\sim$\textbf{[YY.Y]}\% at $K=8$, confirming that the model family is
+$\sim$\textbf{94.5}\% at $K=8$, confirming that the model family is
 capable and the performance gap is entirely due to domain shift.
 
 \subsection{Task 2B: Adapt Atoms, Freeze Coefficients}
 
 After Stage-1 MNIST training, freezing $a_k$ and updating only $\psivec_k$
-on SVHN (Exp B) recovers $\sim$\textbf{[ZZ.Z]}\% at $K=8$, a significant
-improvement over the no-adaptation baseline.  The gain increases with $K$
-as more atoms provide richer domain-specific expressive capacity.
+on SVHN (Exp B) recovers $\sim$\textbf{81.2}\% at $K=8$, a significant
+improvement over the no-adaptation baseline (18.2\%).  However, the gain
+plateaus around 81\% for $K \ge 4$, well below the upper bound.
 
 \subsection{Task 2C: Adapt Coefficients, Freeze Atoms (Ablation)}
 
 Freezing $\psivec_k$ and updating only $a_k$ (Exp C) recovers
-$\sim$\textbf{[WW.W]}\% at $K=8$, noticeably \emph{worse} than Exp B.
-This confirms that it is the \emph{coefficients}, not the atoms, that
-capture the transferable semantic structure.
+$\sim$\textbf{93.3}\% at $K=8$, substantially \emph{better} than Exp B
+(81.2\%) and within 1.2 percentage points of the upper bound (Exp A,
+94.5\%).  This \emph{reverses} the original hypothesis: the MNIST-learned
+atoms are the domain-invariant component, and the coefficients are the
+domain-specific component that requires adaptation.
 
 \subsection{Summary Table}
 
@@ -254,13 +258,13 @@ capture the transferable semantic structure.
 \toprule
 \textbf{Method} & \textbf{Training} & \textbf{Adaptation} & \textbf{SVHN Acc. (\%)} \\
 \midrule
-Task 1: Baseline (Conv) & MNIST & None & $\sim$\textbf{[XX.X]} \\
+Task 1: Baseline (Conv) & MNIST & None & $\sim$\textbf{18.2} \\
 \midrule
 \multirow{4}{*}{Task 2: DCF ($K=8$)}
-& SVHN (from scratch)  & Full (Exp A)                       & $\sim$\textbf{[YY.Y]} \\
-& MNIST → SVHN         & Adapt $\psivec_k$ only (Exp B)     & $\sim$\textbf{[ZZ.Z]} \\
-& MNIST → SVHN         & Adapt $a_k$ only (Exp C, ablation) & $\sim$\textbf{[WW.W]} \\
-& MNIST → SVHN         & No fine-tuning (pre-adapt)         & $\sim$\textbf{[UU.U]} \\
+& SVHN (from scratch)  & Full (Exp A)                       & $\sim$\textbf{94.5} \\
+& MNIST → SVHN         & Adapt $\psivec_k$ only (Exp B)     & $\sim$\textbf{81.2} \\
+& MNIST → SVHN         & Adapt $a_k$ only (Exp C)           & $\sim$\textbf{93.3} \\
+& MNIST → SVHN         & No fine-tuning (pre-adapt)         & $\sim$\textbf{20.3} \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -274,11 +278,11 @@ Task 1: Baseline (Conv) & MNIST & None & $\sim$\textbf{[XX.X]} \\
 \toprule
 $K$ & Exp A (upper bound) & Exp B (adapt $\psivec_k$) & Exp C (adapt $a_k$) & No adapt \\
 \midrule
-1  & [~] & [~] & [~] & [~] \\
-2  & [~] & [~] & [~] & [~] \\
-4  & [~] & [~] & [~] & [~] \\
-6  & [~] & [~] & [~] & [~] \\
-8  & [~] & [~] & [~] & [~] \\
+1  & 86.1 & 68.7 & 68.7 & 15.8 \\
+2  & 93.1 & 78.8 & 87.7 & 16.0 \\
+4  & 94.5 & 81.0 & 92.4 & 25.4 \\
+6  & 94.5 & 81.7 & 92.8 & 21.6 \\
+8  & 94.5 & 81.2 & 93.3 & 20.3 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -289,12 +293,14 @@ $K$ & Exp A (upper bound) & Exp B (adapt $\psivec_k$) & Exp C (adapt $a_k$) & No
   \centering
   \includegraphics[width=0.72\textwidth]{fig_p2_accuracy_vs_K.pdf}
   \caption{SVHN test accuracy vs $K$ for all four conditions.
-    Exp A (red, upper bound) provides the performance ceiling.
-    Exp B (blue) recovers substantial accuracy by adapting only the atoms.
-    Exp C (orange, ablation) performs significantly worse than Exp B,
-    confirming that coefficients $a_k$ are the domain-invariant component.
-    The pre-adaptation accuracy (grey dashed) is below all adapted methods,
-    validating the usefulness of fine-tuning even a small number of parameters.}
+    Exp A (red, upper bound) saturates at $\sim$94.5\% for $K \ge 4$.
+    Exp C (orange) closely tracks Exp A, reaching 93.3\% at $K=8$ --- within
+    1.2\% of full retraining --- by updating only the coefficients $a_k$.
+    Exp B (blue) plateaus around 81\%, constrained by its tiny atom-update
+    budget (72 parameters per layer).
+    The pre-adaptation baseline (grey dashed) sits at $\sim$16--25\%,
+    confirming the domain gap.  The crossover of Exp C above Exp B is
+    the central finding: \emph{atoms are the transferable component}.}
   \label{fig:acc_vs_K}
 \end{figure}
 
@@ -302,9 +308,10 @@ $K$ & Exp A (upper bound) & Exp B (adapt $\psivec_k$) & Exp C (adapt $a_k$) & No
   \centering
   \includegraphics[width=0.62\textwidth]{fig_p2_summary_bar.pdf}
   \caption{Summary bar chart of SVHN accuracy at $K=8$.
-    The domain gap (Task 1 vs Exp A) is $\sim$50--60\%;
-    Exp B recovers more than half of this gap by adapting only $K$ atoms
-    per layer (72 parameters for $3{\times}3$ kernels).}
+    The domain gap (Task 1 vs Exp A) is $\sim$76 percentage points.
+    Exp C (adapt $a_k$) closes 98.4\% of this gap, reaching 93.3\%.
+    Exp B (adapt $\psivec_k$) closes only 83\% of the gap despite updating
+    all atom parameters, limited by the tiny atom budget (72 per layer).}
   \label{fig:summary_bar}
 \end{figure}
 
@@ -332,7 +339,7 @@ $K$ & Exp A (upper bound) & Exp B (adapt $\psivec_k$) & Exp C (adapt $a_k$) & No
   \caption{Pre-adaptation vs post-adaptation SVHN accuracy for Exp B and C.
     The shaded region (blue) represents the accuracy gain from adapting atoms
     (Exp B).  Both adaptation strategies improve over the no-adaptation
-    baseline, but Exp B consistently outperforms Exp C across all $K$ values.}
+    baseline, and Exp C consistently outperforms Exp B across all $K \ge 2$.}
   \label{fig:pre_vs_adapted}
 \end{figure}
 
@@ -341,63 +348,41 @@ $K$ & Exp A (upper bound) & Exp B (adapt $\psivec_k$) & Exp C (adapt $a_k$) & No
 \label{sec:discussion}
 % ═══════════════════════════════════════════════════════════════════════════════
 
-\subsection{Why Does Sharing Coefficients Promote Semantic Alignment?}
+\subsection{The Atoms Are the Domain-Invariant Component}
 
-The coefficient matrix $a_k \in \R^{c' \times c}$ determines the linear
-combination of atoms used to construct each filter $\W[i,j]$.  Geometrically,
-$a_k$ specifies a \emph{point in the subspace} spanned by $\{\psivec_k\}$.
-When a network is trained on a classification task, the coefficients must be
-configured so that the cascade of convolutional responses produces
-class-discriminative features.
+The central experimental finding — Exp C (93.3\%) $\gg$ Exp B (81.2\%) at
+$K=8$ — \textbf{reverses the original hypothesis} and reveals that
+MNIST-learned filter atoms $\psivec_k$ are already well-suited to SVHN.
+Adaptation need only re-calibrate the coefficient matrices $a_k$.
 
-Fixing $a_k$ during SVHN adaptation enforces \emph{functional equivalence}
-across domains at the representation level: filter $\W[i,j]$ on SVHN still
-combines atoms in the same ratios as on MNIST.  If atom $\psivec_3$ represents
-``a horizontal edge detector'' on MNIST, then after adaptation it might become
-``a horizontal gradient'' on SVHN — different in appearance but fulfilling
-the same \emph{functional role} within the network.  The coefficient
-$a_3[i,j]$ guarantees that the output channel $i$ still selectively responds
-to filters with a dominant third-atom component.
-
-In information-theoretic terms, the coefficients encode \textbf{which
-directions in filter space are semantically important}, and this structure is
-task-defined, hence domain-invariant.  The atoms encode only the low-level
-vocabulary used to realise those directions, which is domain-specific.
-
-Empirically, this is validated by Exp B significantly outperforming Exp C:
-when $a_k$ is allowed to change (Exp C), the network can re-learn which
-atoms are relevant for SVHN, but loses the semantic alignment built during
-MNIST training, leading to slower convergence and lower final accuracy.
-
-\subsection{What Happens When Coefficients Are Domain-Specific and Atoms Are Shared?}
-
-Exp C (freeze $\psivec_k$, adapt $a_k$) corresponds to the hypothesis that
-the \emph{structural basis} of filters is universal (shared atoms), and only
-the \emph{weighting} is domain-specific.  Our results show that this performs
-worse than Exp B, for the following reasons:
+There are three complementary explanations:
 
 \begin{enumerate}[leftmargin=*]
-  \item \textbf{Semantic structure is in the coefficients, not the atoms.}
-        When $a_k$ is allowed to change freely, the network must re-discover
-        which filter directions are useful for SVHN from scratch — effectively
-        discarding the semantic knowledge built during MNIST training.
-        This is analogous to keeping the principal directions of PCA fixed
-        (the atoms) but re-learning the projection weights: if the principal
-        directions are not aligned with the SVHN signal structure, the
-        projections cannot compensate.
+  \item \textbf{Shared digit structure.}
+        MNIST and SVHN both depict the same ten digit classes.  Low-level
+        edge, gradient, and frequency detectors learned for handwritten
+        MNIST strokes are structurally similar to those needed for printed
+        SVHN digits.  The atoms capture this domain-general vocabulary.
+        What differs is how those primitives should be \emph{combined} to
+        handle SVHN's richer texture, variable background, and
+        colour-averaging artifacts — and this combination is encoded in $a_k$.
 
-  \item \textbf{Atoms are low-level, coefficients are high-level.}
-        Low-level feature detectors (edges, gratings) vary predictably with
-        domain (contrast, texture statistics), but which detector \emph{fires}
-        on a given class should be consistent.  Allowing $a_k$ to adapt
-        destroys this consistency.
+  \item \textbf{Parameter budget asymmetry.}
+        Exp B updates only $K \times l^2 = 72$ parameters per conv layer
+        (360 total).  Exp C updates $K \times c' \times c$ coefficients per
+        layer, totalling $\sim$279{,}000 parameters across the network —
+        nearly 800$\times$ more.  Critically, even Exp A (full retraining,
+        $\sim$310{,}000 conv params) achieves only 94.5\%, just 1.2\% above
+        Exp C — confirming that the frozen atoms of Exp C are genuinely
+        sufficient, not merely replaced by brute-force capacity.
 
-  \item \textbf{Quantitative comparison.}
-        From Table~\ref{tab:vs_K}, at $K=8$: Exp B achieves
-        $\sim$\textbf{[ZZ.Z]}\%, while Exp C achieves only
-        $\sim$\textbf{[WW.W]}\%.  The gap widens for smaller $K$, because
-        with few atoms, each atom carries more semantic load, making their
-        fixation in Exp C more damaging.
+  \item \textbf{Stable initialisation.}
+        Initialising $a_k$ from the MNIST-trained values provides a
+        semantically structured starting point.  Fine-tuning these coefficients
+        on SVHN is a small adjustment, not a full re-learning.  Exp B,
+        by contrast, attempts to compensate for the entire domain shift by
+        changing only 72 atom parameters per layer — an insufficient budget
+        that leaves the coefficient structure misaligned with the new domain.
 \end{enumerate}
 
 \begin{table}[h]
@@ -409,39 +394,50 @@ worse than Exp B, for the following reasons:
 \toprule
 Strategy & Update $\psivec_k$? & Update $a_k$? & SVHN Acc.\ (\%) \\
 \midrule
-No adaptation (baseline)    & — & — & $\sim$\textbf{[UU.U]} \\
-Exp B: adapt atoms           & \checkmark & —           & $\sim$\textbf{[ZZ.Z]} \\
-Exp C: adapt coefficients    & —           & \checkmark  & $\sim$\textbf{[WW.W]} \\
-Exp A: full training on SVHN & \checkmark & \checkmark  & $\sim$\textbf{[YY.Y]} \\
+No adaptation (baseline)     & —          & —          & $\sim$20.3 \\
+Exp B: adapt atoms            & \checkmark & —          & $\sim$81.2 \\
+Exp C: adapt coefficients     & —          & \checkmark & $\sim$93.3 \\
+Exp A: full training on SVHN  & \checkmark & \checkmark & $\sim$94.5 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
+\subsection{Re-interpreting the DCF Decomposition for Domain Adaptation}
+
+The ACDA framework \cite{wang2020dictionary} interprets atoms as
+domain-specific and coefficients as domain-invariant, motivating Exp B.
+Our result suggests the opposite for digit-recognition transfer.
+This is not a contradiction: ACDA was validated on object-recognition
+benchmarks (Office, VisDA) where domain shift involves large appearance
+changes in background and object texture.  For digit domains, atomic
+spatial primitives (edge detectors, frequency responses) are already
+universal, and the domain shift manifests as a change in \emph{how}
+those primitives are combined — captured by $a_k$.
+
 \subsection{Atom Visualisation Interpretation}
 
-Figure~\ref{fig:atoms_comparison} shows that after SVHN adaptation (Exp B):
+Figure~\ref{fig:atoms_comparison} shows the atoms before and after Exp B
+adaptation.  Despite Exp B's limited accuracy, the atom visualisation is
+still instructive:
 \begin{itemize}
-  \item The overall spatial structure of each atom is preserved (the ordering
-        from DC-like to oscillatory is maintained).
-  \item The amplitude and sign patterns shift noticeably, reflecting
-        SVHN's richer low-level structure (variable lighting, background
-        clutter, coloured strokes averaged into grey).
-  \item Atoms with higher $k$-indices (encoding finer spatial frequencies)
-        change more dramatically, since SVHN contains richer high-frequency
-        texture than MNIST.
+  \item The low-to-high frequency ordering of atoms is preserved after
+        adaptation, confirming that atoms encode a structured spatial basis.
+  \item Higher-frequency atoms shift more than low-frequency ones, reflecting
+        SVHN's richer high-frequency texture relative to MNIST.
+  \item The modest change in atom shape (relative to the large SVHN accuracy
+        gain in Exp C) reinforces that the atoms were already approximately
+        correct, and the bottleneck was the coefficient re-weighting.
 \end{itemize}
-This visual evidence supports the interpretation of atoms as appearance
-encoders and coefficients as semantic encoders.
 
-\subsection{Efficiency of Atom-Based Adaptation}
+\subsection{Parameter Efficiency Summary}
 
-The number of parameters updated in Exp B is $K \times l^2$ per conv layer.
-For $K=8$, $l=3$: \textbf{72 parameters per layer}, or $72 \times 5 = 360$
-total atom parameters across the 5 conv layers (plus batch norm parameters).
-This is orders of magnitude fewer than full fine-tuning ($\sim$310{,}000 conv
-parameters), yet recovers a substantial fraction of the upper-bound accuracy.
-This efficiency makes DCF adaptation attractive for continual learning and
-federated settings where communication and compute budgets are constrained.
+Exp C achieves 93.3\% SVHN accuracy — within 1.2\% of full retraining —
+while updating $\sim$279{,}000 parameters (vs $\sim$310{,}000 for Exp A).
+Exp B achieves 81.2\% by updating only 360 atom parameters total, a
+compelling result given the tiny budget, but clearly insufficient for
+full domain adaptation.  For deployment settings where model storage is
+constrained, Exp C provides near-oracle accuracy with atoms shared across
+domains, making it attractive for continual or federated learning.
 
 % ═══════════════════════════════════════════════════════════════════════════════
 \begin{thebibliography}{9}
