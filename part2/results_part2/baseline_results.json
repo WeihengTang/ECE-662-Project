@@ -1,0 +1,12 @@
+{
+  "args": {
+    "epochs": 30,
+    "lr": 0.01,
+    "batch_size": 128,
+    "gpu": 0,
+    "seed": 42
+  },
+  "best_mnist_acc": 99.65,
+  "best_epoch": 20,
+  "svhn_no_adapt_acc": 18.150737553779962
+}
