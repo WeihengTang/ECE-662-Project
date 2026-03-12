@@ -89,8 +89,10 @@ def plot_accuracy_vs_K(direct, adapt):
     ax.set_xlabel('Number of Filter Atoms $K$')
     ax.set_ylabel('SVHN Test Accuracy (%)')
     ax.set_title('Part 2: SVHN Test Accuracy vs $K$\n(DCF Domain Adaptation Experiments)')
-    ax.legend(fontsize=9, loc='lower right')
+    ax.legend(fontsize=9, bbox_to_anchor=(1.05, 0.5), loc='center left',
+              borderaxespad=0)
     ax.grid(True, alpha=0.3)
+    plt.tight_layout()
     savefig(fig, 'fig_p2_accuracy_vs_K.pdf')
 
 

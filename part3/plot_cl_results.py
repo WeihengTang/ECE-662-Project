@@ -153,6 +153,8 @@ def plot_memory_footprint(bl, dcf):
     ax.yaxis.get_major_formatter().set_scientific(False)
 
     # Annotate totals
+    max_val = max(bl_total if bl is not None else 0,
+                  dcf_total if dcf is not None else 0)
     if bl is not None:
         ax.text(0, bl_total * 1.02, f'{bl_total:,}',
                 ha='center', fontsize=10, fontweight='bold')
@@ -164,10 +166,12 @@ def plot_memory_footprint(bl, dcf):
                 f'({ratio:.1f}× compression)',
                 ha='center', fontsize=9, color='tab:blue')
 
+    ax.set_ylim(0, max_val * 1.4)
     ax.set_title('Memory Footprint: Baseline vs DCF-CL',
                  fontsize=13, fontweight='bold')
-    ax.legend(fontsize=9, loc='upper right')
+    ax.legend(fontsize=9, loc='upper center', ncol=2, bbox_to_anchor=(0.5, 1.0))
     ax.grid(axis='y', alpha=0.3)
+    plt.tight_layout()
     savefig(fig, 'fig_p3_memory_footprint.pdf')
 
 
