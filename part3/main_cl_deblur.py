@@ -42,7 +42,8 @@ from dcf_layer import Conv_DCF
 from models.autoencoder_dcf import DenoisingAutoencoderDCF
 from models.autoencoder import DenoisingAutoencoder
 from split_mnist_blur import (get_split_task_loaders, NUM_TASKS,
-                              DIGITS_PER_TASK, task_name, BLUR_KERNEL)
+                              DIGITS_PER_TASK, task_name, task_label,
+                              BLUR_DESCRIPTIONS, TASK_BLUR)
 
 RESULTS = os.path.join(_HERE, 'results_part3_v2')
 os.makedirs(RESULTS, exist_ok=True)
@@ -147,38 +148,39 @@ def _savefig(fig, name):
 
 def plot_blur_examples(test_loaders, device):
     """One sample per task: blurred (top) and clean (bottom)."""
-    fig, axes = plt.subplots(2, NUM_TASKS, figsize=(2.4 * NUM_TASKS, 5))
+    fig, axes = plt.subplots(2, NUM_TASKS, figsize=(2.8 * NUM_TASKS, 5))
+    blur_short = ['Gauss1.5', 'Mot45', 'Defocus', 'Gauss2.5', 'Mot0']
     for t in range(NUM_TASKS):
         blur, clean = next(iter(test_loaders[t]))
         b_img = blur[0, 0].cpu().numpy()
         c_img = clean[0, 0].cpu().numpy()
         axes[0, t].imshow(b_img, cmap='gray', vmin=0, vmax=1)
-        axes[0, t].set_title(f'T{t}: {{{task_name(t)}}}', fontsize=10)
+        axes[0, t].set_title(f'T{t}: {{{task_name(t)}}}\n{blur_short[t]}',
+                             fontsize=9)
         axes[0, t].axis('off')
         axes[1, t].imshow(c_img, cmap='gray', vmin=0, vmax=1)
         axes[1, t].axis('off')
     axes[0, 0].set_ylabel('Blurred', fontsize=10)
     axes[1, 0].set_ylabel('Clean', fontsize=10)
-    fig.suptitle('Split-MNIST Deblurring Tasks (Gaussian blur, $\\sigma$=1.5)',
+    fig.suptitle('Split-MNIST Deblurring Tasks (per-task blur kernels)',
                  fontsize=12, y=0.98)
-    fig.tight_layout(rect=[0, 0, 1, 0.94])
+    fig.tight_layout(rect=[0, 0, 1, 0.92])
     _savefig(fig, 'fig_p3v2_blur_examples.pdf')
 
 
 def plot_forgetting_curves(psnr_dcf, psnr_base):
     """PSNR per task across training phases."""
-    fig, axes = plt.subplots(1, NUM_TASKS, figsize=(3.2 * NUM_TASKS, 3.5),
+    fig, axes = plt.subplots(1, NUM_TASKS, figsize=(3.2 * NUM_TASKS, 3.8),
                              sharey=True)
     phases = list(range(NUM_TASKS))
+    blur_short = ['Gauss1.5', 'Mot45', 'Defocus', 'Gauss2.5', 'Mot0']
     for j in range(NUM_TASKS):
         ax = axes[j]
-        # Baseline
         vals_b = [psnr_base[t][j] for t in phases]
         ax.plot(phases, vals_b, 'r--o', ms=4, label='Baseline')
-        # DCF-CL
         vals_d = [psnr_dcf[t][j] for t in phases]
         ax.plot(phases, vals_d, 'b-s', ms=4, label='DCF-CL')
-        ax.set_title(f'Task {j}  ({{{task_name(j)}}})', fontsize=10)
+        ax.set_title(f'T{j} {{{task_name(j)}}}\n{blur_short[j]}', fontsize=9)
         ax.set_xlabel('Training phase')
         ax.set_xticks(phases)
         ax.grid(alpha=0.3)
