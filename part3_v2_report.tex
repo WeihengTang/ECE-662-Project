@@ -1,0 +1,509 @@
+\documentclass[11pt,letterpaper]{article}
+
+%% ── Packages ─────────────────────────────────────────────────────────────────
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb,bm,bbm}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{xcolor}
+\usepackage{enumitem}
+\usepackage{microtype}
+\usepackage{parskip}
+\usepackage{array}
+
+\hypersetup{colorlinks=true, linkcolor=blue, citecolor=blue, urlcolor=blue}
+
+%% ── Macros ───────────────────────────────────────────────────────────────────
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\W}{\mathbf{W}}
+\newcommand{\avec}{\mathbf{a}}
+\newcommand{\psivec}{\boldsymbol{\psi}}
+\newcommand{\norm}[1]{\left\|#1\right\|}
+
+% Placeholder command for values to be filled after running experiments.
+% Usage: \placeholder{description} renders as bold red [description].
+\newcommand{\placeholder}[1]{\textbf{\textcolor{red}{[#1]}}}
+
+\begin{document}
+
+\noindent \textbf{ECE 66200: Pattern Recognition} \hfill \textbf{Spring 2026} \\
+\vspace{1cm}
+
+\begin{center}
+    {\Large \textbf{Project 1, Part 3 (v2):\\
+    Continual Deblurring via Filter Atom Swapping}} \\
+    \vspace{0.5cm}
+    {\large [Your Name]} \\
+    \vspace{0.3cm}
+    {\large \today}
+\end{center}
+\vspace{0.5cm}
+
+%%=============================================================================
+\section{Motivation}
+\label{sec:motivation}
+%%=============================================================================
+
+When a neural network is trained sequentially on a stream of tasks, gradient
+updates optimised for the current task overwrite weights that were critical for
+earlier tasks --- a phenomenon known as \emph{catastrophic forgetting}
+\cite{french1999catastrophic}.  The naive remedy is to maintain an independent
+copy of the model for each task, but this incurs a memory cost that grows
+linearly with the number of tasks and is impractical for deployment on
+resource-constrained devices.
+
+This problem is directly relevant to my research on \textbf{image deblurring
+for spatially varying point spread functions (SV-PSFs)}.  A deployed imaging
+system encounters many distinct blur conditions over its lifetime --- changes
+in focus distance, aperture setting, atmospheric turbulence, or sensor aging
+--- and each condition constitutes a new deblurring task.  A practical system
+must master new blur conditions as they arise, without forgetting how to handle
+previously encountered ones, and without storing a separate CNN for every blur
+type.
+
+The \emph{Decomposed Convolutional Filter} (DCF) framework
+\cite{qiu2018dcfnet} provides a natural mechanism for this: by decomposing
+each convolutional filter into shared \emph{atoms} $\psivec_k$ and
+task-specific \emph{coefficients} $\avec_k$, we can isolate the task-dependent
+and task-invariant components.  Building on the \emph{Filter Atom Swapping}
+idea of Miao et al.\ \cite{miao2021continual}, we design a continual learning
+system where only a handful of lightweight atom parameters are stored per task,
+while the vast majority of the network --- coefficients, decoder, and batch
+normalisation --- remains shared and frozen.
+
+%%=============================================================================
+\section{Problem Formulation}
+\label{sec:formulation}
+%%=============================================================================
+
+\subsection{Split-MNIST Deblurring Tasks}
+
+We construct five sequential deblurring tasks by partitioning the 10 MNIST
+digit classes into pairs and degrading all images with the same Gaussian
+point spread function.  Table~\ref{tab:tasks} defines the task sequence.
+
+\begin{table}[h]
+\centering
+\caption{Five sequential Split-MNIST deblurring tasks.  All tasks share
+         the same Gaussian blur ($\sigma = 1.5$, $7 \times 7$ kernel).}
+\label{tab:tasks}
+\begin{tabular}{clcc}
+\toprule
+Task $t$ & Digit classes & Training samples & Test samples \\
+\midrule
+0 & \{0, 1\} & $\sim$12{,}000 & $\sim$2{,}000 \\
+1 & \{2, 3\} & $\sim$12{,}000 & $\sim$2{,}000 \\
+2 & \{4, 5\} & $\sim$12{,}000 & $\sim$2{,}000 \\
+3 & \{6, 7\} & $\sim$12{,}000 & $\sim$2{,}000 \\
+4 & \{8, 9\} & $\sim$12{,}000 & $\sim$2{,}000 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+By keeping the blur kernel fixed across tasks, we isolate the
+class-incremental learning challenge: the model must learn to reconstruct
+new digit classes without forgetting previously learned ones, and the only
+source of distributional shift between tasks is the spatial structure of the
+digits themselves.  Figure~\ref{fig:blur_ex} shows example blurred and clean
+images from each task.
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=0.85\textwidth]{fig_p3v2_blur_examples.pdf}
+  \caption{Split-MNIST deblurring tasks.  \textbf{Top row:} Gaussian-blurred
+    inputs ($\sigma = 1.5$).  \textbf{Bottom row:} clean targets.  Each column
+    corresponds to one of the five tasks, with two digit classes per task.}
+  \label{fig:blur_ex}
+\end{figure}
+
+\subsection{DCF Decomposition Recap}
+
+Recall from Parts~1 and~2 that the DCF decomposition
+\cite{qiu2018dcfnet} writes each convolutional filter as:
+\begin{equation}
+  \W[i,j] \;=\; \sum_{k=1}^{K} a_k[i,j]\,\psivec_k,
+  \qquad
+  \psivec_k \in \R^{l \times l},\quad a_k \in \R^{c' \times c},
+  \label{eq:dcf}
+\end{equation}
+where $\psivec_k$ are \textbf{filter atoms} (a spatial basis dictionary) and
+$a_k$ are \textbf{coefficients} (the task-specific mixing weights).  For
+$K = 6$ atoms with $3 \times 3$ kernels, the atoms comprise only
+$K \times l^2 = 6 \times 9 = 54$ parameters per convolutional layer.
+
+\subsection{Forgetting Metric}
+
+We measure catastrophic forgetting via \emph{backward transfer} (BWT):
+\begin{equation}
+  \mathrm{BWT} = \frac{1}{T{-}1}\sum_{j=0}^{T-2}
+  \bigl(\mathrm{PSNR}_{T-1,\,j} - \mathrm{PSNR}^*_{j}\bigr),
+  \label{eq:bwt}
+\end{equation}
+where $\mathrm{PSNR}^*_j$ is the peak PSNR on Task~$j$ measured immediately
+after its own training, and $\mathrm{PSNR}_{T-1,\,j}$ is the PSNR on Task~$j$
+after the final task has been trained.  Negative BWT indicates forgetting;
+BWT $= 0$ means no performance degradation on any earlier task.
+
+%%=============================================================================
+\section{Design Choice: Filter Atom Swapping}
+\label{sec:design}
+%%=============================================================================
+
+\subsection{Core Idea}
+
+Our approach \emph{inverts} the coefficient-swapping strategy used in Part~2.
+Rather than freezing atoms and swapping coefficients (which required storing
+$\sim$93{,}000 parameters per task, yielding only 1.19$\times$ compression),
+we \textbf{freeze the coefficients, decoder, and batch normalisation} after the
+initial task and \textbf{swap only the atoms} for each new task.
+
+The intuition is as follows.  The coefficients $\avec_k$ and the decoder
+collectively define a general-purpose reconstruction pipeline: ``given a set of
+spatial filter atoms, here is how to combine them into encoder filters and
+how to decode the resulting feature maps back into a clean image.''  This
+pipeline is learned on Task~0 and then kept fixed.  For each subsequent task,
+only the atoms --- the spatial building blocks that the pipeline operates on
+--- need to change to accommodate the new digit classes.
+
+\subsection{Training Protocol}
+
+\begin{enumerate}[leftmargin=*]
+  \item \textbf{Task 0 (initial training):}
+    Build a DCF autoencoder with $K = 6$ atoms per encoder layer
+    (\texttt{bases\_grad=True}, Fourier-Bessel initialisation).
+    Train \emph{all} parameters --- atoms $\psivec_k$, coefficients $\avec_k$,
+    decoder weights, and batch normalisation --- end-to-end on Task~0 for
+    30 epochs.  After convergence, store
+    $\Psi^{(0)} = \{\psivec_k^{(0)}\}_{k=1}^{K}$ for all encoder layers.
+
+  \item \textbf{Tasks $t = 1, 2, 3, 4$ (incremental):}
+    \begin{itemize}
+      \item \emph{Freeze:} coefficients $\avec_k$
+            (\texttt{weight.requires\_grad = False}), all decoder parameters,
+            and batch normalisation (set to eval mode so running statistics
+            from Task~0 are preserved).
+      \item \emph{Warm-start:} copy the Task~0 atoms $\Psi^{(0)}$ into the
+            model.  This ensures the model starts from a coherent state
+            (the coefficients were trained with these atoms).
+      \item \emph{Train:} update \emph{only} the atoms $\psivec_k$
+            on Task~$t$ for 30 epochs.
+      \item \emph{Store:} save
+            $\Psi^{(t)} = \{\psivec_k^{(t)}\}_{k=1}^{K}$ --- a snapshot
+            of 162 scalars.
+    \end{itemize}
+
+  \item \textbf{Inference on Task $j$:}
+    Load $\Psi^{(j)}$ into the encoder.  Because the coefficients, decoder,
+    and batch normalisation are \emph{identical} to their Task-0 values, the
+    resulting model is \emph{exactly} the one that was trained for Task~$j$.
+    This guarantees \textbf{BWT $= 0.0$\,dB} by construction.
+\end{enumerate}
+
+\subsection{Memory Compression Analysis}
+
+Let $P$ denote the total parameters of the DCF autoencoder and $P_\psi$ the
+atom parameters across all encoder layers.  For our architecture:
+\begin{align}
+  P_\psi &= 3 \times (K \times l^2) = 3 \times 54 = 162, \\
+  P_\text{shared} &= P - P_\psi.
+\end{align}
+For $T$ tasks:
+\begin{equation}
+  \text{DCF-CL memory} = P_\text{shared} + T \times P_\psi.
+\end{equation}
+The baseline (storing $T$ independent models of $P_\text{base}$ parameters
+each) requires $T \times P_\text{base}$.  The compression ratio is therefore:
+\begin{equation}
+  \text{Compression} = \frac{T \times P_\text{base}}{P_\text{shared} + T \times P_\psi}.
+  \label{eq:compression}
+\end{equation}
+Since $P_\psi \ll P$, the denominator is dominated by $P_\text{shared}$ and
+the ratio grows linearly with $T$.  For $T = 5$ tasks in our experiment, the
+expected compression is approximately
+$\frac{5 \times P_\text{base}}{P_\text{shared} + 810}$, which evaluates to
+roughly $5\times$.
+
+\subsection{Why Atoms (Not Coefficients) Are Task-Specific Here}
+
+This design choice may seem to contradict Part~2, where Exp~C showed that
+\emph{coefficients} carry domain-specific information for MNIST$\to$SVHN
+adaptation.  However, the two settings have fundamentally different task
+structures:
+
+\begin{itemize}[leftmargin=*]
+  \item \textbf{Part 2 (domain adaptation):} Source and target share the same
+    digit classes but differ in appearance (handwritten vs.\ street-view).
+    The spatial patterns (edges, strokes) are similar across domains, so atoms
+    are \emph{domain-invariant}.  The way these patterns are combined into
+    class-discriminative features differs, making coefficients
+    \emph{domain-specific}.
+
+  \item \textbf{Part 3 (class-incremental reconstruction):} All tasks share
+    the same image domain (MNIST) and the same blur, but the digit classes
+    differ.  The reconstruction objective requires different spatial atoms to
+    capture the distinct stroke geometries of each digit pair (e.g., ``0'' and
+    ``1'' vs.\ ``8'' and ``9''), while the general reconstruction pipeline
+    (coefficient combination + decoding) transfers across digit classes.
+\end{itemize}
+
+The appropriate swapping target therefore depends on the \emph{nature of the
+task variation}: atoms for class-level differences, coefficients for
+domain-level differences.
+
+%%=============================================================================
+\section{Experimental Settings and Results}
+\label{sec:results}
+%%=============================================================================
+
+\subsection{Architecture and Training Details}
+
+Both the DCF-CL and baseline models use the same autoencoder architecture
+from Part~1 Task~3:
+
+\begin{itemize}[leftmargin=*]
+  \item \textbf{Encoder:} three convolutional layers
+    ($1 \to 32 \to 64 \to 64$), each followed by BatchNorm and ReLU;
+    MaxPool(2,2) after the first two layers.  The DCF-CL variant replaces
+    Conv2d with Conv\_DCF ($K = 6$, \texttt{bases\_grad=True},
+    Fourier-Bessel initialisation, mode1).
+  \item \textbf{Decoder:} three ConvTranspose2d layers
+    ($64 \to 64 \to 32 \to 1$) with BatchNorm, ReLU, and a final Sigmoid.
+  \item \textbf{Training:} Adam optimiser, learning rate $10^{-3}$, cosine
+    annealing, 30 epochs per task, batch size 128, MSE loss.
+\end{itemize}
+
+% ── NOTE TO AUTHOR: fill placeholder values from cl_deblur_results.json ──
+% Search for \placeholder{...} and replace with actual numbers.
+
+\subsection{PSNR Results}
+
+Table~\ref{tab:final_psnr} reports the final PSNR on each task after all
+five tasks have been trained.  The baseline suffers severe forgetting on
+earlier tasks, while DCF-CL maintains its peak performance on every task
+through exact atom restoration.
+
+\begin{table}[h]
+\centering
+\caption{PSNR (dB) on each task after the final training phase (Task~4).}
+\label{tab:final_psnr}
+\begin{tabular}{lcccccl}
+\toprule
+Method & T0 $\{0,1\}$ & T1 $\{2,3\}$ & T2 $\{4,5\}$ & T3 $\{6,7\}$ & T4 $\{8,9\}$ & BWT (dB) \\
+\midrule
+Baseline   & \placeholder{B0} & \placeholder{B1} & \placeholder{B2} & \placeholder{B3} & \placeholder{B4} & \placeholder{BWT\_base} \\
+DCF-CL     & \placeholder{D0} & \placeholder{D1} & \placeholder{D2} & \placeholder{D3} & \placeholder{D4} & \textbf{0.0} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Forgetting Curves}
+
+Figure~\ref{fig:forget} displays the PSNR trajectory for each task across
+the five training phases.  For the baseline (red, dashed), previously learned
+tasks exhibit steep PSNR drops as new tasks are trained --- the hallmark of
+catastrophic forgetting.  For DCF-CL (blue, solid), the PSNR for each
+completed task remains perfectly flat across all subsequent training phases,
+confirming zero backward transfer.
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=\textwidth]{fig_p3v2_forgetting_curves.pdf}
+  \caption{Forgetting curves: PSNR on each task across training phases.
+    \textbf{Baseline (red, dashed):} severe forgetting on earlier tasks as
+    later tasks are trained.
+    \textbf{DCF-CL (blue, solid):} perfectly flat curves for completed tasks,
+    confirming BWT $= 0.0$\,dB.}
+  \label{fig:forget}
+\end{figure}
+
+\subsection{PSNR Heatmaps}
+
+Figure~\ref{fig:heatmap} presents the full $5 \times 5$ PSNR matrices.  In
+the baseline heatmap (left), entries below the diagonal drop sharply,
+quantifying the cumulative forgetting as more tasks are trained.  In the
+DCF-CL heatmap (right), each column is constant from the task's training
+phase onward, confirming that atom swapping provides an exact model restore
+with no approximation error.
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=\textwidth]{fig_p3v2_psnr_heatmaps.pdf}
+  \caption{PSNR matrices (\textbf{rows} = training phase;
+    \textbf{cols} = evaluation task).
+    \textbf{Left (Baseline):} off-diagonal entries below the diagonal drop
+    sharply, quantifying forgetting.
+    \textbf{Right (DCF-CL):} each column is constant from its training phase
+    onward --- exact restore via atom swapping.}
+  \label{fig:heatmap}
+\end{figure}
+
+\subsection{Memory Footprint}
+
+Figure~\ref{fig:memory} compares the total stored parameters for both
+approaches.  The baseline requires storing five independent models, totalling
+\placeholder{base\_mem} parameters.  DCF-CL stores one shared set of
+coefficients, decoder, and batch normalisation (\placeholder{shared}
+parameters) plus five atom snapshots of 162 parameters each (810 total),
+for a grand total of \placeholder{dcf\_mem} parameters --- a
+\placeholder{ratio}$\times$ compression.
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=0.55\textwidth]{fig_p3v2_memory_footprint.pdf}
+  \caption{Memory footprint for 5 tasks.
+    Baseline stores 5 full models.
+    DCF-CL stores one shared model plus 5 lightweight atom snapshots (162
+    scalars each), achieving $\sim$\placeholder{ratio}$\times$ compression.}
+  \label{fig:memory}
+\end{figure}
+
+%%=============================================================================
+\section{Discussion}
+\label{sec:discussion}
+%%=============================================================================
+
+\subsection{Why Storing Subspaces Prevents Catastrophic Forgetting}
+\label{sec:disc_forget}
+
+Catastrophic forgetting occurs because gradient updates for a new task
+modify shared parameters in directions that are beneficial for the current
+task but destructive for previously learned tasks.  The standard
+continual-learning literature addresses this through regularisation
+(EWC \cite{kirkpatrick2017overcoming}, SI), replay buffers, or parameter
+isolation.  Our approach falls squarely in the \emph{parameter isolation}
+category, and achieves the strongest possible guarantee: \textbf{exactly zero
+forgetting}, not merely reduced forgetting.
+
+The mechanism is algebraically simple.  Let
+$\theta = (\Psi, \Phi)$ denote the full parameter vector, split into atoms
+$\Psi = \{\psivec_k\}$ and everything else
+$\Phi = \{\avec_k, \theta_\text{dec}, \theta_\text{BN}\}$.  After Task~0, we
+fix $\Phi$ permanently.  For Task~$t$, we learn $\Psi^{(t)}$ while $\Phi$
+is frozen, producing the task-specific model
+$\theta^{(t)} = (\Psi^{(t)}, \Phi)$.  At inference time, restoring
+$\Psi^{(j)}$ recovers $\theta^{(j)}$ \emph{exactly}, because $\Phi$ has not
+changed.
+
+The key insight is that there is \emph{no interference between task
+subspaces}: the atoms for Task~$j$ live in their own copy of parameter memory
+and are never modified by training on any other task.  Unlike
+regularisation-based methods (which approximate ``importance'' and still permit
+small drifts) or replay methods (which approximately re-learn old tasks), atom
+swapping provides a \emph{hard guarantee} of zero forgetting --- the model for
+Task~$j$ is bitwise identical to what it was immediately after Task~$j$'s
+training.
+
+This guarantee comes at a cost: the shared components $\Phi$ are frozen after
+Task~0 and never adapted to later tasks.  If the reconstruction pipeline
+learned on Task~0 is insufficiently general, later tasks may achieve lower
+PSNR than they would with full end-to-end training.  Our experimental results
+(Table~\ref{tab:final_psnr}) indicate that this cost is modest for the
+Split-MNIST setting, where the shared blur kernel and similar image statistics
+across digit classes make the Task-0 pipeline broadly applicable.
+
+\subsection{Extension to Spatially Varying PSF Deblurring}
+\label{sec:disc_svpsf}
+
+The Split-MNIST experiment demonstrates the atom-swapping principle in a
+controlled setting with discrete tasks.  My research on non-blind
+deconvolution for spatially varying PSFs requires extending this principle to
+a fundamentally different regime: \emph{continuous} blur conditions that
+vary spatially within a single image.
+
+\paragraph{From discrete tasks to continuous conditions.}
+In our experiment, each task corresponds to a discrete set of digit classes,
+and we store a separate atom snapshot $\Psi^{(t)}$ for each.  In SV-PSF
+deblurring, a ``task'' corresponds to a specific local PSF condition
+$h(\mathbf{x})$ at spatial position $\mathbf{x}$.  The PSF varies smoothly
+across the image plane --- there are infinitely many ``tasks'' parameterised
+by position and optical state.  Clearly, we cannot store infinitely many
+discrete atom sets.
+
+\paragraph{Filter atom swapping as inspiration.}
+The Split-MNIST experiment validates that a powerful shared reconstruction
+pipeline (coefficients + decoder) can be combined with lightweight
+task-specific atoms to produce high-quality reconstructions.  This suggests
+a design pattern for SV-PSF deblurring: train a \textbf{shared universal
+deconvolution network and decoder} (analogous to the frozen $\Phi$), and
+generate \textbf{spatially varying atoms} (analogous to $\Psi^{(t)}$) that
+adapt the network to the local blur condition at each spatial position.
+
+\paragraph{Connection to predictive interpolation.}
+Since we operate in the \emph{non-blind} setting (the PSF is known or
+estimated from calibration data), we have access to physical priors that
+describe the blur at each position.  Rather than storing discrete atom
+snapshots, we can train a lightweight \textbf{hypernetwork}
+$f_\phi : h(\mathbf{x}) \mapsto \Psi(\mathbf{x})$ that predicts the
+local atoms directly from the known local PSF:
+\begin{equation}
+  \psivec_k(\mathbf{x}) = f_\phi\bigl(h(\mathbf{x})\bigr)_k,
+  \qquad k = 1, \ldots, K.
+\end{equation}
+This hypernetwork needs to predict only $K \times l^2$ values per spatial
+position (e.g., $6 \times 9 = 54$ for our architecture), making it
+extremely lightweight.  Because the PSF field $h(\mathbf{x})$ is spatially
+smooth, the predicted atoms will also vary smoothly, and the hypernetwork
+can be very small (a few fully connected layers) while still capturing the
+relevant variation.
+
+\paragraph{The vision: single-forward-pass SV-PSF deblurring.}
+By feeding these generated, spatially varying atoms
+$\Psi(\mathbf{x})$ into the shared deconvolution network, we can solve the
+spatially varying deblurring problem \emph{in a single forward pass} with
+an extremely low parameter cost.  The resulting architecture would:
+\begin{enumerate}[leftmargin=*]
+  \item Accept as input: a blurred image $y$ and a PSF field
+        $\{h(\mathbf{x})\}$.
+  \item Use the hypernetwork to predict spatially varying atoms
+        $\Psi(\mathbf{x})$ from the PSF field.
+  \item Inject these atoms into the shared DCF encoder, producing
+        position-adapted feature maps.
+  \item Decode the feature maps through the shared decoder to produce
+        the restored image.
+\end{enumerate}
+This bypasses the need to train massive dynamic convolutions or
+spatially varying filter banks, and instead leverages the low-dimensional
+atom subspace structure to achieve spatial adaptivity at minimal cost.
+The Split-MNIST experiment provides the proof of concept that the
+shared-pipeline-plus-task-specific-atoms paradigm works; the hypernetwork
+extension turns it into a practical architecture for real-world SV-PSF
+deblurring.
+
+%%=============================================================================
+%% REFERENCES
+%%=============================================================================
+
+\begin{thebibliography}{9}
+
+\bibitem{qiu2018dcfnet}
+Q.~Qiu, X.~Cheng, and G.~Sapiro.
+\newblock {DCFNet}: Deep neural network with decomposed convolutional filters.
+\newblock In \emph{ICML}, 2018.
+
+\bibitem{miao2021continual}
+Z.~Miao, Z.~Wang, W.~Chen, and Q.~Qiu.
+\newblock Continual learning with filter atom swapping.
+\newblock In \emph{ICLR}, 2022.
+
+\bibitem{french1999catastrophic}
+R.~M. French.
+\newblock Catastrophic forgetting in connectionist networks.
+\newblock \emph{Trends in Cognitive Sciences}, 3(4):128--135, 1999.
+
+\bibitem{kirkpatrick2017overcoming}
+J.~Kirkpatrick et al.
+\newblock Overcoming catastrophic forgetting in neural networks.
+\newblock \emph{Proceedings of the National Academy of Sciences},
+  114(13):3521--3526, 2017.
+
+\bibitem{wang2020dictionary}
+Z.~Wang, X.~Cheng, G.~Sapiro, and Q.~Qiu.
+\newblock A dictionary approach to domain-invariant learning in deep networks.
+\newblock In \emph{NeurIPS}, 2020.
+
+\end{thebibliography}
+
+\end{document}

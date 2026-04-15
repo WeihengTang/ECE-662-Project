@@ -123,14 +123,41 @@ DCF and FB variants replace every \texttt{Conv2d} with \texttt{Conv\_DCF}
 \subsection{Task 1: PCA Filter Truncation}
 \label{sec:p1_task1}
 
+The first task investigates the intrinsic dimensionality of trained CNN
+filters by applying PCA-based truncation to a fully trained baseline model.
+The central question is: \emph{how many principal components are needed to
+preserve classification accuracy when no retraining is allowed?}
+
 \textbf{Setup.}
-The baseline AlexNet is trained to convergence (SGD, lr=0.01, cosine
-annealing, 30 epochs, batch size 128).
-We then apply SVD to each layer's filter matrix and reconstruct with
-$K = 1, \ldots, 9$ components \emph{without any retraining}, measuring
-test accuracy at each $K$.
+A baseline AlexNet is first trained to convergence on MNIST using SGD with
+learning rate 0.01, cosine annealing, for 30 epochs with batch size 128.
+After training, we apply SVD to each convolutional layer's reshaped filter
+matrix and reconstruct the filters using only $K = 1, \ldots, 9$ principal
+components \emph{without any retraining}, measuring the resulting test
+accuracy at each $K$.  In parallel, we also train DCF-AlexNet models
+(with learned atoms) end-to-end for each $K$ to compare the effect of
+post-hoc truncation versus joint optimisation.
 
 \textbf{Results.}
+Figure~\ref{fig:p1_task1} presents the main Task~1 findings.
+As shown in Figure~\ref{fig:p1_acc}, the PCA curve (blue, no retraining)
+exhibits a dramatic accuracy cliff: for $K \le 4$, accuracy remains at
+chance level (9.74\%), barely improves to 26.39\% at $K=5$, then jumps to
+85.92\% at $K=6$ and 97.0\% at $K=7$.  Only the full-rank reconstruction
+($K=9$) restores the 99.65\% baseline.  In stark contrast, the DCF curve
+(orange, retrained end-to-end) shows that a single learned atom ($K=1$)
+already achieves 98.96\%, and $K \ge 2$ matches or exceeds the full-rank
+baseline.  This gap reveals that the penalty for compression vanishes
+entirely when the basis is jointly optimised with the classification
+objective.  The corresponding parameter count plot
+(Figure~\ref{fig:p1_params}) confirms that the conv parameter budget
+grows linearly in $K$, so any $K < 9$ yields genuine compression below the
+full-rank baseline.
+
+Table~\ref{tab:p1_acc} provides the full numerical comparison across all
+three methods.  The DCF column demonstrates remarkably stable performance
+across all $K$, while the PCA column's sharp cliff underscores the
+fragility of post-hoc truncation.
 
 \begin{figure}[h]
   \centering
@@ -177,6 +204,16 @@ $K$ & PCA (no retrain) & DCF (retrained) & FB (retrained) \\
 \end{tabular}
 \end{table}
 
+To understand why the PCA curve exhibits such a sharp cliff, we examine
+the cumulative explained variance per layer.  As shown in
+Figure~\ref{fig:p1_ev}, Conv1 reaches 83\% explained variance at $K=6$
+and 95.5\% at $K=8$, while deeper layers saturate even more slowly
+(only 73\% at $K=6$).  All layers require $K=9$ for 100\% variance.
+This is consistent with the accuracy cliff: even 5--17\% of unexplained
+variance is sufficient to destroy the classification signal when no
+retraining is performed, because the discarded components encode
+task-relevant structure that the downstream layers depend upon.
+
 \begin{figure}[h]
   \centering
   \includegraphics[width=0.55\textwidth]{fig7_explained_variance.pdf}
@@ -192,18 +229,53 @@ $K$ & PCA (no retrain) & DCF (retrained) & FB (retrained) \\
 \subsection{Task 2: Fourier-Bessel Bases vs Learned DCF Atoms}
 \label{sec:p1_task2}
 
+Task~1 established that jointly optimised atoms greatly outperform post-hoc
+PCA truncation.  A natural follow-up question is whether the atoms
+\emph{need} to be learned at all, or whether a fixed analytical basis can
+perform equally well.  Fourier-Bessel (FB) functions --- the radial
+eigenfunctions of the 2-D Helmholtz equation on the unit disk --- form a
+natural candidate basis because they span the same low-frequency spatial
+modes that CNN filters typically learn.
+
 \textbf{Setup.}
-We compare two DCF variants retrained from scratch on MNIST:
+We compare two DCF variants, both retrained from scratch on MNIST:
 \begin{itemize}[leftmargin=*]
   \item \textbf{DCF (learned):} $K \in \{1,\ldots,9\}$,
         \texttt{bases\_grad=True}, random atom initialisation.
+        Both atoms $\psivec_k$ and coefficients $a_k$ are optimised.
   \item \textbf{FB (fixed):} $K \in \{1,\ldots,6\}$, atoms set to the
-        6 Fourier-Bessel bases (solutions to the 2-D Helmholtz equation
-        on the unit disk), \texttt{bases\_grad=False}.
+        6 Fourier-Bessel bases (the maximum number available for a
+        $3{\times}3$ kernel), \texttt{bases\_grad=False}.
         Only coefficients $a_k$ are trained.
 \end{itemize}
 
 \textbf{Results.}
+Figure~\ref{fig:p1_task2} compares the accuracy of FB, DCF, and PCA across
+varying $K$.  As shown in Figure~\ref{fig:p1_fb_dcf}, the FB and DCF
+curves closely track each other across all overlapping values of $K$.
+Both methods surpass 99.4\% accuracy at $K=2$, far exceeding PCA's 9.74\%
+at the same compression level.  Notably, FB reaches 99.64\% at its maximum
+of $K=6$, which matches the best DCF accuracy of 99.64\% at $K=8$.  This
+near-perfect agreement indicates that the analytical FB subspace spans
+essentially the same task-relevant directions as the data-driven atoms
+learned by DCF.
+
+Figure~\ref{fig:p1_fb_atoms} displays the 6 FB bases, ordered from a DC
+blob ($k=1$) to progressively finer oscillatory patterns ($k=6$).  This
+frequency ordering mirrors the spectral content typically observed in
+trained CNN filters.  To illustrate this correspondence, Figure~\ref{fig:p1_pca_atoms}
+shows the top PCA atoms extracted from Conv1 of the trained baseline AlexNet.
+The first few principal components ($\psivec_1$--$\psivec_3$) resemble
+low-frequency edge detectors, while higher components encode finer spatial
+structure.  The visual similarity between these learned atoms and the
+analytical FB bases in Figure~\ref{fig:p1_fb_atoms} explains why fixed FB
+atoms can match fully learned DCF atoms: the filter manifold of digit
+classifiers is naturally well-aligned with the Fourier-Bessel subspace.
+
+The full numerical comparison is included in Table~\ref{tab:p1_acc} (FB
+column).  At every $K$ from 1 to 6, FB accuracy is within 0.6\% of the
+corresponding DCF value, confirming that data-driven atom learning provides
+negligible benefit for this task.
 
 \begin{figure}[h]
   \centering
@@ -234,7 +306,7 @@ We compare two DCF variants retrained from scratch on MNIST:
     $32{\times}9$ filter matrix).
     Atoms $\psivec_1$--$\psivec_3$ resemble low-frequency edge detectors;
     higher components encode finer spatial structure.  The visual similarity
-    to the FB bases in Fig.~\ref{fig:p1_fb_atoms} explains why fixed FB atoms
+    to the FB bases in Figure~\ref{fig:p1_fb_atoms} explains why fixed FB atoms
     are competitive with fully learned DCF atoms.}
   \label{fig:p1_pca_atoms}
 \end{figure}
@@ -243,15 +315,33 @@ We compare two DCF variants retrained from scratch on MNIST:
 \subsection{Task 3: Denoising Autoencoder with DCF Encoder}
 \label{sec:p1_task3}
 
+Tasks~1 and~2 focused on classification.  Task~3 tests whether the
+low-rank filter structure extends to a different objective ---
+image denoising --- by building a convolutional autoencoder whose encoder
+uses DCF or FB layers.
+
 \textbf{Setup.}
-A convolutional denoising autoencoder with a three-layer encoder
-($1\to32\to64\to64$, BatchNorm, MaxPool) and three ConvTranspose2d decoder
-layers restoring $1{\times}28{\times}28$.  Trained on MNIST corrupted by
-additive Gaussian noise ($\sigma=0.3$, clipped to $[0,1]$), MSE loss, Adam,
-30 epochs.  DCF and FB variants replace the encoder \texttt{Conv2d} layers.
-Metric: PSNR (dB) between reconstructed and clean images.
+The autoencoder comprises a three-layer encoder
+($1\to32\to64\to64$, BatchNorm, MaxPool) and a symmetric three-layer
+\texttt{ConvTranspose2d} decoder that restores the $1{\times}28{\times}28$
+output.  The model is trained on MNIST images corrupted by additive
+Gaussian noise ($\sigma=0.3$, clipped to $[0,1]$) using MSE loss, Adam
+optimiser, and 30 epochs.  DCF and FB variants replace the encoder's
+\texttt{Conv2d} layers with \texttt{Conv\_DCF}, while the decoder remains
+standard.  We report PSNR (dB) between the reconstructed and clean images
+on the held-out test set.
 
 \textbf{Results.}
+Figure~\ref{fig:p1_psnr} plots PSNR versus $K$ for both DCF and FB
+autoencoders.  Both curves rise steeply from $K=1$ to $K=3$, then plateau
+as additional atoms provide diminishing returns.  The DCF encoder reaches
+23.75\,dB at $K=9$, while the FB encoder reaches 23.71\,dB at its maximum
+of $K=6$ --- nearly identical ceilings despite FB having fewer available
+atoms.  Even at $K=4$, DCF achieves 23.58\,dB, within 0.17\,dB of its
+asymptotic ceiling.  These results confirm that the low-rank subspace
+structure observed in classification filters also holds for denoising
+filters: a small number of atoms captures essentially all of the
+task-relevant spatial information.
 
 \begin{figure}[h]
   \centering
@@ -269,23 +359,42 @@ Metric: PSNR (dB) between reconstructed and clean images.
 \subsection{Discussion}
 \label{sec:p1_disc}
 
+The results from Tasks~1--3 collectively reveal several important
+properties of the CNN filter subspace.
+
 \textbf{Basis choice matters more than compression ratio.}
-At $K=6$, PCA (no retrain) gives 85.9\% while DCF and FB both give
-$>$99.6\% --- a 13.7-point gap at \emph{identical parameter counts}.
-The difference is that DCF/FB optimise atoms jointly with the task,
-whereas PCA inherits atoms from a different optimisation (full-rank training).
+Comparing the three methods at the same $K$ in Table~\ref{tab:p1_acc}
+highlights a striking finding: at $K=6$, PCA (no retrain) gives 85.9\%
+while DCF and FB both give $>$99.6\% --- a 13.7-point gap at
+\emph{identical parameter counts}.  The crucial difference is that DCF and
+FB optimise the atom-coefficient decomposition jointly with the task
+objective, whereas PCA inherits its basis from a different optimisation
+(full-rank training) and thus retains principal components that are
+energetically dominant but not necessarily task-relevant.
 
 \textbf{Low effective rank of the filter manifold.}
-The explained-variance curves (Fig.~\ref{fig:p1_ev}) show that $K=5$
-captures only 62--74\% of filter variance.  The remaining 26--38\% is
-sufficient to destroy classification without retraining, yet insignificant
-when the network is trained end-to-end with the compressed parameterisation.
+The explained-variance curves in Figure~\ref{fig:p1_ev} reveal that $K=5$
+captures only 62--74\% of filter variance, depending on the layer.  The
+remaining 26--38\% is sufficient to destroy classification accuracy when
+no retraining is allowed, yet this same unexplained variance is
+\emph{insignificant} when the network is trained end-to-end with the
+compressed parameterisation (as seen in the DCF and FB columns of
+Table~\ref{tab:p1_acc}).  This indicates that the energy in the discarded
+PCA components is redistributed during joint training, and the network
+learns to concentrate its representational capacity into the available
+$K$ dimensions.
 
 \textbf{FB as a principled alternative.}
-FB atoms require no training and are indistinguishable from learned DCF atoms
-on both classification (Table~\ref{tab:p1_acc}) and denoising
-(Fig.~\ref{fig:p1_psnr}), confirming that digit manifolds align well with
-low-frequency spatial modes.
+As shown in Figures~\ref{fig:p1_fb_dcf} and~\ref{fig:p1_psnr}, FB atoms
+require no data-driven learning and are indistinguishable from learned DCF
+atoms on both classification (Table~\ref{tab:p1_acc}, within 0.6\% at all
+$K$) and denoising (23.71 vs 23.75\,dB at maximum $K$).  The visual
+comparison of FB bases (Figure~\ref{fig:p1_fb_atoms}) with PCA-extracted
+atoms (Figure~\ref{fig:p1_pca_atoms}) confirms that the filter manifold
+of digit classifiers is naturally well-aligned with low-frequency
+analytical spatial modes.  This makes FB a compelling choice in
+applications where atom learning is impractical or where a fixed,
+interpretable basis is preferred.
 
 \newpage
 
@@ -298,30 +407,52 @@ low-frequency spatial modes.
 
 \noindent
 \textbf{Background.}
-A classifier trained on MNIST (handwritten digits, white-on-black) fails on
-SVHN (house-number photographs, colour, real-world backgrounds).
-SVHN is converted to grayscale by channel averaging:
-$I_\text{gray} = (I_R+I_G+I_B)/3$, making both datasets
-$1{\times}32{\times}32$ inputs while retaining the distribution gap.
-The DCF decomposition $\W[i,j] = \sum_k a_k[i,j]\,\psivec_k$ separates:
+Part~1 established that CNN filters lie in a low-dimensional subspace that
+can be efficiently parameterised by the DCF decomposition.  Part~2 asks
+whether this decomposition can also facilitate \emph{domain adaptation}:
+can a model trained on one digit dataset be efficiently adapted to a
+different one by selectively updating only part of the DCF representation?
+
+The source domain is MNIST \cite{lecun1998gradient} (handwritten digits,
+white-on-black), and the target is SVHN \cite{netzer2011reading}
+(house-number photographs, colour, real-world backgrounds).  SVHN images
+are converted to grayscale by channel averaging
+($I_\text{gray} = (I_R+I_G+I_B)/3$), making both datasets share the same
+$1{\times}32{\times}32$ input format while retaining a substantial
+distribution gap in appearance, background clutter, and contrast.
+
+The DCF decomposition $\W[i,j] = \sum_k a_k[i,j]\,\psivec_k$ (Eq.~\ref{eq:dcf})
+naturally separates the filter into two distinct components:
 \begin{itemize}[leftmargin=*]
-  \item $\psivec_k$ (\textbf{atoms}): low-level spatial primitives.
-  \item $a_k$ (\textbf{coefficients}): the functional recipe combining them.
+  \item $\psivec_k$ (\textbf{atoms}): low-level spatial primitives that
+        define the dictionary of spatial patterns.
+  \item $a_k$ (\textbf{coefficients}): the task-specific recipe that
+        determines how atoms are linearly combined for each filter.
 \end{itemize}
+This separation enables a controlled experiment: by selectively freezing
+one component and adapting the other, we can probe which part of the
+representation carries domain-specific versus domain-invariant information.
 
 % ─────────────────────────────────────────────────────────────────────────────
 \subsection{Task 1: Baseline --- No Adaptation}
 \label{sec:p2_task1}
 
+Before attempting any adaptation, we first quantify the raw domain gap by
+evaluating a model trained entirely on the source domain.
+
 \textbf{Setup.}
-The standard Conv2d AlexNet (same architecture as Part 1) is trained on MNIST
-(SGD, lr=0.01, momentum 0.9, cosine annealing, 30 epochs) and evaluated
-directly on SVHN without any fine-tuning.
+The standard Conv2d AlexNet (same architecture as Part~1) is trained on
+MNIST using SGD with learning rate 0.01, momentum 0.9, cosine annealing,
+for 30 epochs, and then evaluated directly on the SVHN test set without
+any fine-tuning or modification.
 
 \textbf{Result.}
-The MNIST-trained model achieves \textbf{18.2\%} on SVHN vs 99.65\% on
-MNIST --- an 81-point drop that quantifies the domain gap and motivates
-the adaptation strategies in Task~2.
+The MNIST-trained model achieves only \textbf{18.2\%} accuracy on SVHN,
+compared with 99.65\% on MNIST --- an 81-point drop that sharply quantifies
+the domain gap.  This near-chance performance (chance on SVHN's 10 classes
+is 10\%) confirms that the distribution shift between handwritten and
+street-view digits is severe enough to render naive transfer ineffective,
+and motivates the selective adaptation strategies explored in Task~2.
 
 % ─────────────────────────────────────────────────────────────────────────────
 \subsection{Task 2: DCF Adaptation Experiments}
@@ -331,15 +462,38 @@ the adaptation strategies in Task~2.
 Three experiments use DCF-AlexNet with $K \in \{1,2,4,6,8\}$:
 \begin{description}[leftmargin=0pt]
   \item[Exp A (upper bound):] Train DCF from scratch on SVHN.
+        This serves as the performance ceiling, since the model has full
+        access to the target domain during training.
   \item[Exp B (adapt atoms):] Stage~1: train DCF on MNIST
         (\texttt{bases\_grad=True}, 30 epochs, lr=0.01).
         Stage~2: freeze $a_k$, unfreeze $\psivec_k$, fine-tune on SVHN
         (15 epochs, lr=0.001).
-  \item[Exp C (adapt coefficients):] Same Stage~1, then
+        This tests the hypothesis that atoms are domain-specific and must
+        be adapted.
+  \item[Exp C (adapt coefficients):] Same Stage~1 as Exp~B, then
         freeze $\psivec_k$, unfreeze $a_k$, fine-tune on SVHN.
+        This tests the complementary hypothesis that coefficients carry the
+        domain-specific information.
 \end{description}
 
 \textbf{Results.}
+Table~\ref{tab:p2_main} summarises the key comparison at $K=8$.  The most
+striking finding is that \textbf{Exp~C (93.3\%)} vastly outperforms
+\textbf{Exp~B (81.2\%)}, a 12.1-point gap that is opposite to the initial
+hypothesis that atoms would be the domain-specific component requiring
+adaptation.  Exp~C also comes within just 1.2\% of the Exp~A upper bound
+(94.5\%), demonstrating that adapting only the coefficient matrices is
+sufficient to close nearly the entire domain gap.  The pre-adapt baseline
+(20.3\%) is barely above the no-adaptation Conv baseline (18.2\%),
+confirming that the DCF parameterisation alone does not resolve the
+distribution shift.
+
+Table~\ref{tab:p2_vsK} presents the full accuracy breakdown across all
+values of $K$.  The advantage of Exp~C over Exp~B is consistent at every
+$K \ge 2$ and widens as $K$ increases, reaching its maximum at $K=8$.
+Exp~A saturates at approximately 94.5\% for $K \ge 4$, suggesting that
+four atoms are sufficient to capture the spatial filter structure needed
+for SVHN classification.
 
 \begin{table}[h]
 \centering
@@ -377,6 +531,27 @@ $K$ & Exp A (upper bound) & Exp B (adapt $\psivec_k$) &
 \end{tabular}
 \end{table}
 
+These trends are visualised in Figure~\ref{fig:p2_acc_vs_K}, which
+plots SVHN accuracy against $K$ for all four conditions.  The Exp~C curve
+(orange) closely tracks the Exp~A upper bound (red) across all $K$, while
+Exp~B (blue) plateaus around 81\% --- constrained by its limited
+per-layer atom budget of just 72 parameters ($K \times l^2 = 8 \times 9$).
+The pre-adapt baseline (grey) remains at 16--25\%, confirming that the
+domain gap persists without fine-tuning regardless of $K$.
+
+Figure~\ref{fig:p2_summary} provides a compact side-by-side comparison at
+$K=8$ as a bar chart.  It clearly shows that Exp~C closes 98.4\% of the
+76-point domain gap (from 18.2\% to 93.3\%), while Exp~B closes only 83\%
+of the gap (to 81.2\%).
+
+Finally, Figure~\ref{fig:p2_atoms} visualises the Conv1 filter atoms at
+$K=8$ before and after Exp~B adaptation.  The top row shows the
+MNIST-trained atoms, while the bottom row shows the same atoms after
+fine-tuning on SVHN.  The low-to-high frequency ordering is largely
+preserved, but higher-frequency atoms exhibit more noticeable shifts,
+reflecting the richer texture content present in SVHN's natural images
+compared with MNIST's clean stroke patterns.
+
 \begin{figure}[h]
   \centering
   \includegraphics[width=0.72\textwidth]{fig_p2_accuracy_vs_K.pdf}
@@ -413,36 +588,58 @@ $K$ & Exp A (upper bound) & Exp B (adapt $\psivec_k$) &
 \subsection{Discussion}
 \label{sec:p2_disc}
 
+The experimental results from Task~2 yield a clear and somewhat
+counterintuitive conclusion about the roles of atoms and coefficients in
+domain adaptation.
+
 \textbf{The atoms are the domain-invariant component.}
-Exp C (93.3\%) $\gg$ Exp B (81.2\%) \emph{reverses the original hypothesis}
-that atoms are domain-specific.
-For digit domains, MNIST-learned spatial primitives are already suited to SVHN;
-what must change is how they are combined ($a_k$).
+As shown in Tables~\ref{tab:p2_main} and~\ref{tab:p2_vsK} and visualised
+in Figure~\ref{fig:p2_acc_vs_K}, Exp~C (93.3\%) vastly outperforms Exp~B
+(81.2\%), a result that \emph{reverses the original hypothesis} that atoms
+encode domain-specific spatial patterns requiring adaptation.
+Instead, for digit domains, MNIST-learned spatial primitives are already
+well-suited to SVHN; what must change is how these primitives are
+\emph{combined} through the coefficient matrices $a_k$.  The atom
+visualisation in Figure~\ref{fig:p2_atoms} supports this interpretation:
+the MNIST and SVHN atoms share the same low-to-high frequency ordering,
+indicating that the spatial dictionary transfers across domains with
+minimal adjustment.
 
-\textbf{Three reasons:}
+\textbf{Three contributing factors explain this finding:}
 \begin{enumerate}[leftmargin=*]
-  \item \emph{Shared low-level structure.}  Both domains contain digit strokes
-        with similar local edge and frequency content.  Atoms encode this
-        shared vocabulary; coefficients encode the domain-specific weighting.
+  \item \emph{Shared low-level structure.}  Both MNIST and SVHN contain
+        digit strokes with similar local edge orientations and frequency
+        content.  The atoms encode this shared visual vocabulary, while the
+        coefficients encode the domain-specific weighting that adapts the
+        vocabulary to each domain's particular appearance statistics.
 
-  \item \emph{Parameter budget asymmetry.}  Exp B updates 72 atom params
-        per layer (360 total); Exp C updates $\sim$279{,}000 coefficient
-        params.  Yet Exp A (full retraining, $\sim$310{,}000) achieves only
-        1.2\% more than Exp C, confirming frozen atoms are a genuine
-        bottleneck for Exp B --- not just a capacity disadvantage.
+  \item \emph{Parameter budget asymmetry.}  Exp~B updates only 72 atom
+        parameters per layer (360 total across 5 layers); Exp~C updates
+        $\sim$279{,}000 coefficient parameters.  Yet Exp~A (full
+        retraining, $\sim$310{,}000 parameters) achieves only 1.2\% more
+        than Exp~C, confirming that the frozen atoms are a genuine capacity
+        bottleneck for Exp~B --- not merely a parameter-count disadvantage.
 
-  \item \emph{Stable initialisation.}  MNIST-trained $a_k$ encode which
-        atomic combinations produce class-discriminative responses.
-        Fine-tuning from this point on SVHN is a small adjustment.
-        Exp B disrupts this by changing the ingredients while keeping the
-        recipes fixed.
+  \item \emph{Stable initialisation from source training.}  The
+        MNIST-trained coefficients $a_k$ already encode which atomic
+        combinations produce class-discriminative feature maps.
+        Fine-tuning these coefficients on SVHN is a comparatively small
+        adjustment.  Exp~B, by contrast, perturbs the spatial ingredients
+        while keeping the recipes fixed, which is a fundamentally more
+        disruptive change.
 \end{enumerate}
 
 \textbf{Comparison with the ACDA literature.}
 Wang et al.\ \cite{wang2020dictionary} treat atoms as domain-specific in
-object-recognition benchmarks where low-level texture changes dramatically.
-For digit domains, both source and target share stroke-level primitives,
-so the domain shift is captured in the higher-level coefficient structure.
+object-recognition benchmarks (e.g., VisDA, Office-Home) where low-level
+texture changes dramatically between domains (photographs vs.\ sketches
+vs.\ clipart).  For digit domains, however, both source and target share
+stroke-level primitives, so the domain shift is captured in the
+higher-level coefficient structure rather than in the spatial dictionary
+itself.  This suggests that the optimal adaptation strategy (atoms vs.\
+coefficients) depends on the \emph{nature} of the domain gap, and our
+results complement the ACDA findings by identifying a regime where
+coefficient adaptation alone is sufficient.
 
 \newpage
 
@@ -457,25 +654,39 @@ so the domain shift is captured in the higher-level coefficient structure.
 \subsection{Motivation and Connection to SV-PSF Research}
 \label{sec:p3_motivation}
 
-Sequential training causes \emph{catastrophic forgetting}
-\cite{french1999catastrophic}: gradient updates for Task~$t$ overwrite
-weights learned for earlier tasks.
-The na\"{i}ve fix --- one model per task --- incurs memory linear in
-the number of tasks.
+Parts~1 and~2 demonstrated that the DCF decomposition enables compression
+and domain adaptation by separating filters into shared atoms and
+task-specific coefficients.  Part~3 extends this idea to the
+\emph{continual learning} setting, where a model must sequentially learn
+multiple tasks without forgetting previously acquired knowledge.
+
+Sequential training of neural networks is known to cause
+\emph{catastrophic forgetting} \cite{french1999catastrophic}: gradient
+updates optimised for the current task overwrite weights that were critical
+for earlier tasks, leading to severe performance degradation on previously
+learned objectives.  The na\"{i}ve fix --- maintaining one independent
+model per task --- avoids forgetting but incurs memory cost that grows
+linearly with the number of tasks, which is impractical for large-scale
+deployment.
 
 My personal research on \textbf{image deblurring for spatially varying
-PSFs (SV-PSFs)} makes this directly relevant.
-A deployed camera encounters many blur conditions over its lifetime
-(focus distance, aperture, atmospheric turbulence, sensor aging);
-each is a new deblurring task.
-A practical system must master new conditions without forgetting old ones,
-and without storing a separate CNN per blur type.
+PSFs (SV-PSFs)} makes this problem directly relevant.
+A deployed camera encounters many different blur conditions over its
+lifetime (varying focus distance, aperture setting, atmospheric
+turbulence, sensor aging); each condition constitutes a distinct
+deblurring task.  A practical system must master new blur conditions
+without forgetting how to handle old ones, and without storing a
+separate CNN per blur type.
 
 % ─────────────────────────────────────────────────────────────────────────────
 \subsection{Problem Formulation and Approach}
 \label{sec:p3_form}
 
 \textbf{Blur tasks.}
+We define three sequential synthetic deblurring tasks on MNIST, each
+applying a different point spread function (PSF) to simulate a distinct
+blur condition.  The tasks are summarised in Table~\ref{tab:p3_tasks}
+and visualised in Figure~\ref{fig:p3_blur}.
 
 \begin{table}[h]
 \centering
@@ -493,6 +704,9 @@ Task $t$ & Blur type & PSF & Parameters \\
 \end{table}
 
 \textbf{DCF-CL approach.}
+Building on the insight from Part~2 that atoms can remain frozen while
+coefficients capture task-specific information, we propose a
+coefficient-swapping strategy for continual learning.
 A DCF-based denoising autoencoder separates filters into:
 \begin{itemize}[leftmargin=*]
   \item \textbf{Shared atoms $\psivec_k$}: learned on Task~0, frozen permanently.
@@ -519,17 +733,36 @@ training.  Negative BWT $=$ forgetting; DCF-CL gives BWT $= 0$ by construction.
 \subsection{Experimental Setup}
 \label{sec:p3_setup}
 
-Both models use the same autoencoder architecture from Part~1 (three-layer
-Conv/DCF encoder, three ConvTranspose decoder layers).
-DCF-CL uses $K=6$ atoms.
-Both trained with Adam, lr=$10^{-3}$, cosine annealing, 20 epochs per task,
-batch size 128.
-The \emph{baseline} is the same Conv autoencoder trained sequentially
-on Tasks 0$\to$1$\to$2 without any CL mechanism.
+Both the baseline and DCF-CL models use the same autoencoder architecture
+from Part~1 Task~3: a three-layer Conv/DCF encoder
+($1\to32\to64\to64$, BatchNorm, MaxPool) and a symmetric three-layer
+\texttt{ConvTranspose2d} decoder.  The DCF-CL variant uses $K=6$ atoms
+(matching the Fourier-Bessel maximum for $3{\times}3$ kernels, as
+established in Part~1).  Both models are trained with the Adam optimiser
+(lr=$10^{-3}$), cosine annealing, for 20 epochs per task with batch size
+128.
+
+The \emph{baseline} is a standard Conv autoencoder trained sequentially
+on Tasks~0$\to$1$\to$2 without any continual learning mechanism --- each
+new task simply continues training from the previous task's final weights,
+which is the na\"{i}ve approach that maximally exposes the model to
+catastrophic forgetting.  The DCF-CL model follows the protocol described
+in Section~\ref{sec:p3_form}: freeze atoms after Task~0, then train and
+store per-task coefficients (along with BatchNorm and decoder states) for
+each subsequent task.
 
 % ─────────────────────────────────────────────────────────────────────────────
 \subsection{Results}
 \label{sec:p3_results}
+
+Figure~\ref{fig:p3_blur} illustrates the three blur tasks and their
+corresponding PSF kernels.  Task~0 applies isotropic Gaussian blur
+($\sigma=1.5$), producing uniformly softened digits.  Task~1 applies
+directional motion blur at $45^\circ$, creating streak-like artefacts.
+Task~2 applies a circular defocus kernel ($R=2.5$ pixels), introducing
+mild boundary ringing.  These three kernels represent distinct degradation
+types that require different deconvolution strategies, making them a
+suitable testbed for continual learning.
 
 \begin{figure}[h]
   \centering
@@ -541,6 +774,16 @@ on Tasks 0$\to$1$\to$2 without any CL mechanism.
     Task~2 (defocus): disk kernel with boundary ringing.}
   \label{fig:p3_blur}
 \end{figure}
+
+\textbf{Catastrophic forgetting in the baseline.}
+Figure~\ref{fig:p3_forgetting} displays the forgetting curves for both
+methods.  The baseline (red, dashed) suffers severe catastrophic
+forgetting: after training on Task~1, Task~0's PSNR drops from 29.16 to
+15.57\,dB ($-13.6$\,dB), and although it partially recovers to 21.39\,dB
+after Task~2, it remains 7.8\,dB below its peak.  Task~1 is similarly
+damaged after Task~2 training (30.57$\to$12.08\,dB).  The DCF-CL method
+(blue, solid), by contrast, maintains peak PSNR for every task across all
+subsequent training phases.
 
 \begin{figure}[h]
   \centering
@@ -555,6 +798,16 @@ on Tasks 0$\to$1$\to$2 without any CL mechanism.
   \label{fig:p3_forgetting}
 \end{figure}
 
+\textbf{PSNR heatmaps.}
+The PSNR matrices in Figure~\ref{fig:p3_heatmaps} provide a complementary
+view of the same data.  Each row corresponds to a training phase (after
+training through Task~$t$), and each column corresponds to an evaluation
+task.  In the baseline heatmap (left), entries below the diagonal drop
+sharply, quantifying the extent of forgetting on previously learned tasks.
+In the DCF-CL heatmap (right), each column is constant to four decimal
+places --- confirming that the coefficient swap restores the exact
+task-specific model with no approximation error.
+
 \begin{figure}[h]
   \centering
   \includegraphics[width=\textwidth]{fig_p3_psnr_heatmaps.pdf}
@@ -566,6 +819,14 @@ on Tasks 0$\to$1$\to$2 without any CL mechanism.
     swap restores the exact task model.}
   \label{fig:p3_heatmaps}
 \end{figure}
+
+\textbf{Final PSNR comparison.}
+Table~\ref{tab:p3_results} reports the PSNR on all three tasks after the
+final training phase (Task~2).  The baseline retains only 21.39\,dB on
+Task~0 and 12.08\,dB on Task~1, while performing well on the most
+recently trained Task~2 (31.02\,dB).  DCF-CL achieves 28.89, 29.38, and
+29.48\,dB on Tasks~0--2 respectively, with a backward transfer (BWT)
+of exactly 0.0\,dB compared with $-13.1$\,dB for the baseline.
 
 \begin{table}[h]
 \centering
@@ -580,6 +841,18 @@ DCF-CL (swap)    & \textbf{28.89} & \textbf{29.38} & \textbf{29.48} & \textbf{0.
 \bottomrule
 \end{tabular}
 \end{table}
+
+\textbf{Memory footprint.}
+Figure~\ref{fig:p3_memory} compares the total stored parameters for both
+approaches.  The baseline requires storing a complete model for each task,
+totalling $3 \times 111{,}681 = 335{,}043$ parameters.  DCF-CL stores
+one shared set of atoms (162 parameters) plus per-task coefficients,
+BatchNorm states, and the decoder, totalling
+$162 + 3 \times 93{,}670 = 281{,}172$ parameters ($1.19\times$ fewer
+than the baseline).  The modest compression reflects that the shared atoms
+constitute only 0.17\% of the total model parameters; the dominant
+per-task cost is the decoder and BatchNorm state, which are not shared in
+the current architecture.
 
 \begin{figure}[h]
   \centering
@@ -598,37 +871,59 @@ DCF-CL (swap)    & \textbf{28.89} & \textbf{29.38} & \textbf{29.48} & \textbf{0.
 \label{sec:p3_disc}
 
 \textbf{Zero forgetting by construction.}
-Injecting $\avec_k^{(j)}$ with frozen $\psivec_k$ algebraically recovers
-the Task-$j$ model --- not an approximation.  The PSNR heatmap confirms this:
-every column of the DCF-CL matrix is constant to four decimal places.
+The coefficient-swapping mechanism achieves zero forgetting not as an
+approximation but as an algebraic guarantee: injecting $\avec_k^{(j)}$
+with frozen $\psivec_k$ exactly recovers the Task-$j$ encoder, and the
+per-task decoder and BatchNorm states are stored separately.  The PSNR
+heatmap in Figure~\ref{fig:p3_heatmaps} confirms this empirically: every
+column of the DCF-CL matrix is constant to four decimal places across all
+training phases.  This contrasts sharply with the baseline, where the
+forgetting curves in Figure~\ref{fig:p3_forgetting} show catastrophic
+PSNR degradation of up to 18.5\,dB on previously learned tasks.
 
 \textbf{Honest assessment of memory savings.}
-With $K=6$, the shared atoms are only 162 of 93,315 parameters (0.17\%).
-Per-task storage includes DCF coefficients, BN running stats, and the
-full decoder ($\sim$93,670 params), nearly equal to storing a full model.
-DCF-CL achieves 1.19$\times$ compression vs the Conv baseline but
-\emph{no} compression vs storing three DCF models of the same size.
-The advantage would be larger if the decoder were also shared, or if
-a deeper/wider encoder were used (atoms become a larger fraction).
+As shown in Figure~\ref{fig:p3_memory}, the memory compression provided
+by DCF-CL in this architecture is modest ($1.19\times$).  With $K=6$,
+the shared atoms constitute only 162 of 93{,}315 total parameters
+(0.17\%).  Per-task storage includes the DCF coefficients, BatchNorm
+running statistics, and the full decoder ($\sim$93{,}670 parameters
+per task), which is nearly equal to storing a complete model.  DCF-CL
+thus achieves meaningful compression only relative to the Conv baseline,
+and essentially no compression relative to storing three independent DCF
+models of the same size.  The memory advantage would be substantially
+larger in architectures where the decoder is also decomposed or shared
+across tasks, or where a deeper or wider encoder is used (so that atoms
+constitute a larger fraction of total parameters).
 
 \textbf{Connection to SV-PSF research.}
+The DCF-CL framework has direct implications for practical image
+deblurring systems that must handle multiple blur conditions:
 \begin{enumerate}[leftmargin=*]
   \item \emph{New conditions without forgetting:} each new PSF calibration
-        state adds a lightweight coefficient snapshot; the shared atom
-        dictionary is reused.
+        state (e.g., a new focus distance or atmospheric condition) adds
+        only a lightweight coefficient snapshot; the shared atom dictionary
+        is reused, avoiding the need to retrain or store a separate model.
   \item \emph{Spatially varying extension:} a spatially varying coefficient
         map $\avec_k^{(x,y)}$ would enable per-patch adaptation while
-        sharing global atoms --- a spatially adaptive deconvolution network.
-  \item \emph{Online adaptation:} only $\avec_k^{(\text{new})}$ is
-        fine-tuned (atoms frozen), converging much faster than full retraining.
+        sharing global atoms --- effectively a spatially adaptive
+        deconvolution network that handles position-dependent blur within
+        a single forward pass.
+  \item \emph{Online adaptation:} only $\avec_k^{(\text{new})}$ needs to
+        be fine-tuned (atoms remain frozen), which converges much faster
+        than full model retraining and is suitable for on-device deployment.
 \end{enumerate}
 
 \textbf{Limitations.}
-Atoms are learned only on Task~0.  If later tasks require frequencies
-absent from Gaussian-trained atoms, performance may degrade.
-Tasks~1 and~2 (29.38, 29.48\,dB) already exceed Task~0 (28.89\,dB),
-suggesting sufficient expressiveness --- but this cannot be guaranteed
-for all PSF types.  Future work could grow the atom set incrementally
+A key limitation of the current approach is that atoms are learned only
+on Task~0 (Gaussian blur) and never updated thereafter.  If later tasks
+require spatial frequencies or patterns absent from the Gaussian-trained
+atom set, performance could degrade.  In our experiments, Tasks~1 and~2
+achieve higher PSNR (29.38 and 29.48\,dB) than Task~0 (28.89\,dB),
+as reported in Table~\ref{tab:p3_results}, suggesting that the $K=6$
+atom dictionary is sufficiently expressive for these blur types.  However,
+this cannot be guaranteed for all PSF types, particularly highly
+anisotropic or structured blur kernels.  Future work could address this by
+growing the atom set incrementally as new tasks arrive
 \cite{miao2021continual}.
 
 \newpage
@@ -640,35 +935,50 @@ for all PSF types.  Future work could grow the atom set incrementally
 \section{Conclusion}
 \label{sec:conclusion}
 
-The three parts form a coherent story about the \textbf{low-rank subspace
-structure of CNN filters}:
+The three parts of this project form a coherent narrative about the
+\textbf{low-rank subspace structure of CNN filters} and its practical
+implications:
 
 \begin{description}[leftmargin=0pt]
   \item[Part 1 reveals the structure.]
-        $K \le 6$ atoms suffice for near-perfect classification and
-        denoising when the basis is optimised.
-        PCA exposes the structure post-hoc; DCF and FB exploit it during
-        training, achieving $>$99.4\% accuracy at $K=2$ where PCA gives
-        only 9.7\%.
+        As demonstrated in Table~\ref{tab:p1_acc} and
+        Figure~\ref{fig:p1_task1}, the filter manifold of trained CNNs is
+        remarkably low-dimensional: $K \le 6$ atoms suffice for
+        near-perfect classification and denoising when the basis is jointly
+        optimised.  PCA exposes this structure post-hoc but cannot exploit
+        it without retraining; DCF and FB exploit it during training,
+        achieving $>$99.4\% accuracy at $K=2$ where PCA gives only 9.7\%.
+        The near-identical performance of fixed Fourier-Bessel bases and
+        learned DCF atoms (Figure~\ref{fig:p1_fb_dcf}) further confirms
+        that the relevant subspace is analytically predictable for digit
+        classification.
 
   \item[Part 2 exploits the structure for transfer.]
-        For digit-domain adaptation (MNIST$\to$SVHN), atoms are
-        \emph{transferable} and coefficients are \emph{domain-specific}.
-        Adapting only $a_k$ (Exp~C) achieves 93.3\%, within 1.2\% of
-        full retraining.
+        For digit-domain adaptation (MNIST$\to$SVHN), the experiments
+        in Table~\ref{tab:p2_main} and Figure~\ref{fig:p2_acc_vs_K}
+        reveal that atoms are the \emph{transferable} component while
+        coefficients carry \emph{domain-specific} information.
+        Adapting only $a_k$ (Exp~C) achieves 93.3\% --- within 1.2\% of
+        full retraining --- while adapting only atoms (Exp~B) plateaus at
+        81.2\%.
 
   \item[Part 3 exploits the structure for continual learning.]
         Freezing atoms and storing per-task coefficient snapshots yields
-        exact zero-forgetting.  The mechanism extends naturally to
-        SV-PSF deblurring, where per-condition coefficients enable
-        on-device multi-condition deblurring without model proliferation.
+        exact zero-forgetting (BWT $= 0.0$\,dB), as confirmed by the
+        constant columns in the PSNR heatmap (Figure~\ref{fig:p3_heatmaps})
+        and the flat forgetting curves (Figure~\ref{fig:p3_forgetting}).
+        The mechanism extends naturally to SV-PSF deblurring, where
+        per-condition coefficient snapshots enable on-device
+        multi-condition deblurring without model proliferation.
 \end{description}
 
 \noindent
 Together, these results validate that the low-rank subspace structure of
-CNN filters is not merely a compression curiosity --- it is the key
-architectural principle enabling compression, domain transfer, and
-continual learning within a single unified parameterisation.
+CNN filters is not merely a compression curiosity --- it is a
+fundamental architectural principle that enables compression, domain
+transfer, and continual learning within a single unified
+parameterisation.  The DCF decomposition provides a principled and
+interpretable framework for all three capabilities.
 
 %%=============================================================================
 %% REFERENCES
