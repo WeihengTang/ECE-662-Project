@@ -23,9 +23,6 @@
 \newcommand{\psivec}{\boldsymbol{\psi}}
 \newcommand{\norm}[1]{\left\|#1\right\|}
 
-% Placeholder command for values to be filled after running experiments.
-% Usage: \placeholder{description} renders as bold red [description].
-\newcommand{\placeholder}[1]{\textbf{\textcolor{red}{[#1]}}}
 
 \begin{document}
 
@@ -82,40 +79,43 @@ normalisation --- remains shared and frozen.
 \subsection{Split-MNIST Deblurring Tasks}
 
 We construct five sequential deblurring tasks by partitioning the 10 MNIST
-digit classes into pairs and degrading all images with the same Gaussian
-point spread function.  Table~\ref{tab:tasks} defines the task sequence.
+digit classes into pairs and assigning each task a \emph{different} blur
+kernel.  Table~\ref{tab:tasks} defines the task sequence.  Using distinct
+PSFs per task is critical: it ensures that the deblurring functions genuinely
+conflict, creating real catastrophic forgetting in the baseline.  (A single
+shared blur would allow the baseline to accumulate knowledge across tasks
+without interference, eliminating the need for a CL mechanism.)
 
 \begin{table}[h]
 \centering
-\caption{Five sequential Split-MNIST deblurring tasks.  All tasks share
-         the same Gaussian blur ($\sigma = 1.5$, $7 \times 7$ kernel).}
+\caption{Five sequential Split-MNIST deblurring tasks.  Each task combines
+         a distinct digit pair with a distinct blur kernel ($7 \times 7$).}
 \label{tab:tasks}
-\begin{tabular}{clcc}
+\begin{tabular}{cllcc}
 \toprule
-Task $t$ & Digit classes & Training samples & Test samples \\
+Task $t$ & Digit classes & Blur type & Train samples & Test samples \\
 \midrule
-0 & \{0, 1\} & $\sim$12{,}000 & $\sim$2{,}000 \\
-1 & \{2, 3\} & $\sim$12{,}000 & $\sim$2{,}000 \\
-2 & \{4, 5\} & $\sim$12{,}000 & $\sim$2{,}000 \\
-3 & \{6, 7\} & $\sim$12{,}000 & $\sim$2{,}000 \\
-4 & \{8, 9\} & $\sim$12{,}000 & $\sim$2{,}000 \\
+0 & \{0, 1\} & Gaussian ($\sigma{=}1.5$)       & $\sim$12{,}000 & $\sim$2{,}000 \\
+1 & \{2, 3\} & Motion ($45^\circ$)              & $\sim$12{,}000 & $\sim$2{,}000 \\
+2 & \{4, 5\} & Defocus ($R{=}2.5$\,px)          & $\sim$12{,}000 & $\sim$2{,}000 \\
+3 & \{6, 7\} & Gaussian ($\sigma{=}2.5$)        & $\sim$12{,}000 & $\sim$2{,}000 \\
+4 & \{8, 9\} & Motion ($0^\circ$, horizontal)   & $\sim$12{,}000 & $\sim$2{,}000 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-By keeping the blur kernel fixed across tasks, we isolate the
-class-incremental learning challenge: the model must learn to reconstruct
-new digit classes without forgetting previously learned ones, and the only
-source of distributional shift between tasks is the spatial structure of the
-digits themselves.  Figure~\ref{fig:blur_ex} shows example blurred and clean
-images from each task.
+Figure~\ref{fig:blur_ex} shows example blurred and clean images from each
+task.  The visual differences between the blur types are clearly visible:
+isotropic Gaussian softening (Tasks~0 and~3), directional motion streaks
+(Tasks~1 and~4), and circular defocus ringing (Task~2).
 
 \begin{figure}[h]
   \centering
   \includegraphics[width=0.85\textwidth]{fig_p3v2_blur_examples.pdf}
-  \caption{Split-MNIST deblurring tasks.  \textbf{Top row:} Gaussian-blurred
-    inputs ($\sigma = 1.5$).  \textbf{Bottom row:} clean targets.  Each column
-    corresponds to one of the five tasks, with two digit classes per task.}
+  \caption{Split-MNIST deblurring tasks.  \textbf{Top row:} blurred inputs
+    (each task uses a different PSF).  \textbf{Bottom row:} clean targets.
+    Each column corresponds to one of the five tasks, with two digit classes
+    and a distinct blur kernel per task.}
   \label{fig:blur_ex}
 \end{figure}
 
@@ -166,7 +166,7 @@ spatial filter atoms, here is how to combine them into encoder filters and
 how to decode the resulting feature maps back into a clean image.''  This
 pipeline is learned on Task~0 and then kept fixed.  For each subsequent task,
 only the atoms --- the spatial building blocks that the pipeline operates on
---- need to change to accommodate the new digit classes.
+--- need to change to accommodate the new digit classes and blur conditions.
 
 \subsection{Training Protocol}
 
@@ -241,12 +241,12 @@ structures:
     class-discriminative features differs, making coefficients
     \emph{domain-specific}.
 
-  \item \textbf{Part 3 (class-incremental reconstruction):} All tasks share
-    the same image domain (MNIST) and the same blur, but the digit classes
-    differ.  The reconstruction objective requires different spatial atoms to
-    capture the distinct stroke geometries of each digit pair (e.g., ``0'' and
-    ``1'' vs.\ ``8'' and ``9''), while the general reconstruction pipeline
-    (coefficient combination + decoding) transfers across digit classes.
+  \item \textbf{Part 3 (class- and blur-incremental reconstruction):} Each
+    task differs in \emph{both} digit classes and blur kernel.  The
+    reconstruction objective requires different spatial atoms to capture both
+    the distinct stroke geometries of each digit pair and the PSF-specific
+    deconvolution patterns, while the general reconstruction pipeline
+    (coefficient combination + decoding) transfers across tasks.
 \end{itemize}
 
 The appropriate swapping target therefore depends on the \emph{nature of the
@@ -275,15 +275,15 @@ from Part~1 Task~3:
     annealing, 30 epochs per task, batch size 128, MSE loss.
 \end{itemize}
 
-% ── NOTE TO AUTHOR: fill placeholder values from cl_deblur_results.json ──
-% Search for \placeholder{...} and replace with actual numbers.
-
 \subsection{PSNR Results}
 
 Table~\ref{tab:final_psnr} reports the final PSNR on each task after all
 five tasks have been trained.  The baseline suffers severe forgetting on
-earlier tasks, while DCF-CL maintains its peak performance on every task
-through exact atom restoration.
+earlier tasks (BWT $= -13.4$\,dB), while DCF-CL maintains its peak
+performance on every task through exact atom restoration (BWT $= 0.0$\,dB).
+DCF-CL outperforms the baseline on all four previously learned tasks by
+margins of 3.1--11.3\,dB; the baseline wins only on the most recently
+trained task (T4), where its weights are still adapted.
 
 \begin{table}[h]
 \centering
@@ -293,8 +293,8 @@ through exact atom restoration.
 \toprule
 Method & T0 $\{0,1\}$ & T1 $\{2,3\}$ & T2 $\{4,5\}$ & T3 $\{6,7\}$ & T4 $\{8,9\}$ & BWT (dB) \\
 \midrule
-Baseline   & \placeholder{B0} & \placeholder{B1} & \placeholder{B2} & \placeholder{B3} & \placeholder{B4} & \placeholder{BWT\_base} \\
-DCF-CL     & \placeholder{D0} & \placeholder{D1} & \placeholder{D2} & \placeholder{D3} & \placeholder{D4} & \textbf{0.0} \\
+Baseline   & 17.59 & 11.84 & 15.16 & 16.37 & \textbf{28.87} & $-13.4$ \\
+DCF-CL     & \textbf{28.90} & \textbf{17.76} & \textbf{23.11} & \textbf{19.45} & 18.47 & \textbf{0.0} \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -344,19 +344,18 @@ with no approximation error.
 
 Figure~\ref{fig:memory} compares the total stored parameters for both
 approaches.  The baseline requires storing five independent models, totalling
-\placeholder{base\_mem} parameters.  DCF-CL stores one shared set of
-coefficients, decoder, and batch normalisation (\placeholder{shared}
-parameters) plus five atom snapshots of 162 parameters each (810 total),
-for a grand total of \placeholder{dcf\_mem} parameters --- a
-\placeholder{ratio}$\times$ compression.
+558{,}405 parameters.  DCF-CL stores one shared set of coefficients, decoder,
+and batch normalisation (93{,}153 parameters) plus five atom snapshots of 162
+parameters each (810 total), for a grand total of 93{,}963 parameters --- a
+$5.94\times$ compression.
 
 \begin{figure}[h]
   \centering
   \includegraphics[width=0.55\textwidth]{fig_p3v2_memory_footprint.pdf}
   \caption{Memory footprint for 5 tasks.
-    Baseline stores 5 full models.
+    Baseline stores 5 full models (558{,}405 params).
     DCF-CL stores one shared model plus 5 lightweight atom snapshots (162
-    scalars each), achieving $\sim$\placeholder{ratio}$\times$ compression.}
+    scalars each), totalling 93{,}963 params --- a $5.94\times$ compression.}
   \label{fig:memory}
 \end{figure}
 
@@ -400,9 +399,12 @@ This guarantee comes at a cost: the shared components $\Phi$ are frozen after
 Task~0 and never adapted to later tasks.  If the reconstruction pipeline
 learned on Task~0 is insufficiently general, later tasks may achieve lower
 PSNR than they would with full end-to-end training.  Our experimental results
-(Table~\ref{tab:final_psnr}) indicate that this cost is modest for the
-Split-MNIST setting, where the shared blur kernel and similar image statistics
-across digit classes make the Task-0 pipeline broadly applicable.
+(Table~\ref{tab:final_psnr}) show that Task~0 retains its full 28.90\,dB,
+while later tasks achieve 17.76--23.11\,dB --- lower than their baseline
+peak of $\sim$29\,dB at the time of training, but vastly better than the
+baseline's post-forgetting PSNR of 11.84--17.59\,dB.  The trade-off is clear:
+DCF-CL sacrifices per-task optimality for the guarantee that no task is ever
+forgotten.
 
 \subsection{Extension to Spatially Varying PSF Deblurring}
 \label{sec:disc_svpsf}
